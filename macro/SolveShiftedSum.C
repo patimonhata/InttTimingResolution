@@ -58,7 +58,8 @@ void BuildCoefficientMatrix(TMatrixD* matrix_a, int d_min, int d_max) {
 bool SolveShiftedSumWeighted(const TVectorD& measured_n,
                              const TVectorD& measured_sigma,
                              TVectorD* solved_n,
-                             TMatrixD* covariance_matrix) {
+                             TMatrixD* covariance_matrix,
+                             TMatrixD* coefficient_matrix = nullptr) {
   // const int kNumUnknowns = 18;
   const int kNumUnknowns = 42; /* 7 times 6 */
   const int kNumParameters = kNumUnknowns + 1;  // +1 for global offset
@@ -77,6 +78,10 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   TMatrixD matrix_a;
   // BuildCoefficientMatrix(&matrix_a, kDelayMin-120, kDelayMax-120);
   BuildCoefficientMatrix(&matrix_a, kDelayMin-106, kDelayMax-106);
+  if (coefficient_matrix != nullptr) {
+    coefficient_matrix->ResizeTo(matrix_a);
+    *coefficient_matrix = matrix_a;
+  }
 
   // TMatrixD weighted_matrix_a(kNumObservations, kNumUnknowns);
   TMatrixD weighted_matrix_a(kNumObservations, kNumParameters);
@@ -124,7 +129,8 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   return true;
 }
 
-void PrintSolvedEquations(const TVectorD& measured_n) {
+void PrintSolvedEquations(const TMatrixD& matrix_a, const TVectorD& measured_n) {
+  const int kNumUnknowns = 42;
   const int kDelayMin = 106;
   const int kDelayMax = 127;
   const int kNumGroups = 7;
@@ -138,23 +144,39 @@ void PrintSolvedEquations(const TVectorD& measured_n) {
     const int d = delay - kDelayMin;
     for (int i = 1; i <= kNumGroups; ++i) {
       const int row = GetRowIndex(i, d, 0, num_scanned_points);
-      const int j_start = 6 * i + d - 5;
-      const int j_end = 6 * i + d;
-
       std::cout << "N_" << i << "^{delay=" << delay << "} = ";
 
       bool first_term = true;
-      for (int j = j_start; j <= j_end; ++j) {
-        if (j < 1 || j > 42) {
+      for (int col = 0; col < matrix_a.GetNcols(); ++col) {
+        const double coefficient = matrix_a(row, col);
+        if (std::abs(coefficient) < 1e-12) {
           continue;
         }
+
         if (!first_term) {
-          std::cout << " + ";
+          std::cout << (coefficient >= 0.0 ? " + " : " - ");
+        } else if (coefficient < 0.0) {
+          std::cout << "-";
         }
-        std::cout << "n_" << j;
+
+        const double abs_coefficient = std::abs(coefficient);
+        if (abs_coefficient != 1.0) {
+          std::cout << abs_coefficient << " * ";
+        }
+
+        if (col < kNumUnknowns) {
+          std::cout << "n_" << col + 1;
+        } else if (col == kNumUnknowns) {
+          std::cout << "global_offset";
+        } else {
+          std::cout << "parameter_" << col + 1;
+        }
         first_term = false;
       }
 
+      if (first_term) {
+        std::cout << "0";
+      }
       std::cout << " = " << measured_n(row) << std::endl;
     }
   }
@@ -218,15 +240,16 @@ void SolveShiftedSum() {
 
   TVectorD solved_n;
   TMatrixD covariance_matrix;
+  TMatrixD coefficient_matrix;
 
-  const bool success = SolveShiftedSumWeighted(measured_n, measured_sigma, &solved_n, &covariance_matrix);
+  const bool success = SolveShiftedSumWeighted(measured_n, measured_sigma, &solved_n, &covariance_matrix, &coefficient_matrix);
 
   if (!success) {
     std::cerr << "Fit failed." << std::endl;
     return;
   }
 
-  PrintSolvedEquations(measured_n);
+  PrintSolvedEquations(coefficient_matrix, measured_n);
   PrintSolution(solved_n, covariance_matrix);
 }
 
