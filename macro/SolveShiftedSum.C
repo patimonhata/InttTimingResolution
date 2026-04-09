@@ -14,7 +14,7 @@ struct ObservationIndex {
 int GetRunFromDelayValue(int delay);
 
 int GetRowIndex(int i, int delay, int delay_min, int num_scanned_points) {
-  if (delay < -9){ /* L1delay 111 = 120-9*/
+  if (delay < 5){ /* L1delay 111 = 106+5*/
     return (i - 1) * num_scanned_points + (delay - delay_min);
   } else {
     /* Since a run with L1delay=111 is absent */
@@ -36,6 +36,7 @@ void BuildCoefficientMatrix(TMatrixD* matrix_a, int d_min, int d_max) {
   matrix_a->Zero();
 
   for (int d = d_min; d <= d_max; ++d) {
+    if (d==5) {continue;}
     for (int i = 1; i <= kNumGroups; ++i) {
       const int row = GetRowIndex(i, d, d_min, num_scanned_points);
 
@@ -74,7 +75,8 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   }
 
   TMatrixD matrix_a;
-  BuildCoefficientMatrix(&matrix_a, kDelayMin-120, kDelayMax-120);
+  // BuildCoefficientMatrix(&matrix_a, kDelayMin-120, kDelayMax-120);
+  BuildCoefficientMatrix(&matrix_a, kDelayMin-106, kDelayMax-106);
 
   // TMatrixD weighted_matrix_a(kNumObservations, kNumUnknowns);
   TMatrixD weighted_matrix_a(kNumObservations, kNumParameters);
@@ -173,7 +175,8 @@ void SolveShiftedSum() {
     for (int bin=1; bin <= 7; bin++) {
       // TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted");
       TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted_minus_plateau");
-      measured_n(GetRowIndex(bin, delay-120, kDelayMin-120, num_scanned_points)) = h_bco_diff_shifted->GetBinContent(bin);
+      // measured_n(GetRowIndex(bin, delay-120, kDelayMin-120, num_scanned_points)) = h_bco_diff_shifted->GetBinContent(bin);
+      measured_n(GetRowIndex(bin, delay-106, kDelayMin-106, num_scanned_points)) = h_bco_diff_shifted->GetBinContent(bin);
     }
   }
 
