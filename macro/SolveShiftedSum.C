@@ -1,5 +1,8 @@
 #include <cmath>
+#include <fstream>
 #include <iostream>
+#include <regex>
+#include <string>
 #include <vector>
 
 #include "TCanvas.h"
@@ -16,14 +19,20 @@ struct ObservationIndex {
   int delay;
 };
 
+struct EquationSpec {
+  ObservationIndex observation;
+  int offset_parity_index;
+  std::vector<int> unknown_indices;
+};
+
 namespace {
 constexpr int kDelayMin = 106;
 constexpr int kDelayMax = 127;
 constexpr int kUnknownBlockSize = 6;
 constexpr int kNumUnknownBlocks = 6;
 constexpr int kNumUnknowns = kUnknownBlockSize * kNumUnknownBlocks;
-constexpr int kNumObservedBins = 5;
-constexpr int kPeakWindowHalfWidth = 2;
+const char* kEquationSpecPath =
+    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
 }
 
 int GetRunFromDelayValue(int delay);
@@ -31,19 +40,11 @@ int GetOffsetIndexFromDelay(int delay, int delay_min);
 int GetDelayFromOffsetIndex(int offset_index, int delay_min);
 int GetParityIndex(int bin);
 const char* GetParityName(int parity_index);
-int GetPeakWindowStartBin(const TH1D* hist);
+int GetNumScannedPoints(int delay_min, int delay_max);
+std::vector<EquationSpec> LoadEquationSpecs(const std::string& path);
 
 int GetNumScannedPoints(int delay_min, int delay_max) {
   return delay_max - delay_min + 1 - 1; /* -1 due to lack of a run with L1delay-111 */
-}
-
-int GetRowIndex(int i, int delay, int delay_min, int num_scanned_points) {
-  if (delay < 5){ /* L1delay 111 = 106+5*/
-    return (i - 1) * num_scanned_points + (delay - delay_min);
-  } else {
-    /* Since a run with L1delay=111 is absent */
-    return (i - 1) * num_scanned_points + (delay-1 - delay_min);
-  }
 }
 
 int GetOffsetIndexFromDelay(int delay, int delay_min) {
@@ -71,50 +72,106 @@ const char* GetParityName(int parity_index) {
   return (parity_index == 0) ? "odd" : "even";
 }
 
-int GetPeakWindowStartBin(const TH1D* hist) {
-  const int peak_bin = hist->GetMaximumBin();
-  const int num_bins = hist->GetNbinsX();
-  int first_bin = peak_bin - kPeakWindowHalfWidth;
-  if (first_bin < 1) {
-    first_bin = 1;
+std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
+  std::ifstream input(path);
+  if (!input) {
+    std::cerr << "ERROR: Could not open equation spec file " << path << std::endl;
+    exit(1);
   }
-  const int last_start = num_bins - kNumObservedBins + 1;
-  if (first_bin > last_start) {
-    first_bin = last_start;
+
+  const std::regex prefix_regex(
+      R"(^N_\{window_bin=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
+  const std::regex unknown_regex(R"(n_(\d+))");
+  const std::regex offset_regex(R"(offset_delay(\d+)_run(\d+)_(odd|even))");
+
+  std::vector<EquationSpec> equation_specs;
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.empty() || line.find("No constraints here") != std::string::npos) {
+      continue;
+    }
+
+    std::smatch prefix_match;
+    if (!std::regex_match(line, prefix_match, prefix_regex)) {
+      std::cerr << "ERROR: Could not parse equation line: " << line << std::endl;
+      exit(1);
+    }
+
+    EquationSpec spec;
+    spec.observation.window_bin = std::stoi(prefix_match[1].str());
+    spec.observation.hist_bin = std::stoi(prefix_match[2].str());
+    spec.observation.delay = std::stoi(prefix_match[3].str());
+
+    const std::string rhs = prefix_match[4].str();
+    for (std::sregex_iterator it(rhs.begin(), rhs.end(), unknown_regex), end; it != end; ++it) {
+      spec.unknown_indices.push_back(std::stoi((*it)[1].str()) - 1);
+    }
+
+    std::smatch offset_match;
+    if (!std::regex_search(rhs, offset_match, offset_regex)) {
+      std::cerr << "ERROR: Missing offset term in equation line: " << line << std::endl;
+      exit(1);
+    }
+
+    const int offset_delay = std::stoi(offset_match[1].str());
+    const int offset_run = std::stoi(offset_match[2].str());
+    const std::string parity_name = offset_match[3].str();
+    spec.offset_parity_index = (parity_name == "odd") ? 0 : 1;
+
+    if (offset_delay != spec.observation.delay) {
+      std::cerr << "ERROR: Delay mismatch in equation line: " << line << std::endl;
+      exit(1);
+    }
+    if (GetRunFromDelayValue(offset_delay) != offset_run) {
+      std::cerr << "ERROR: Run mismatch in equation line: " << line << std::endl;
+      exit(1);
+    }
+    if (spec.observation.window_bin < 1 || spec.observation.window_bin > 5) {
+      std::cerr << "ERROR: Unexpected window_bin in equation line: " << line << std::endl;
+      exit(1);
+    }
+    if (spec.observation.hist_bin < 1) {
+      std::cerr << "ERROR: Unexpected hist_bin in equation line: " << line << std::endl;
+      exit(1);
+    }
+
+    equation_specs.push_back(spec);
   }
-  return first_bin;
+
+  if (equation_specs.empty()) {
+    std::cerr << "ERROR: No constrained equations were loaded from " << path << std::endl;
+    exit(1);
+  }
+
+  return equation_specs;
 }
 
 void BuildCoefficientMatrix(TMatrixD* matrix_a,
-                            const std::vector<ObservationIndex>& observation_indices,
+                            const std::vector<EquationSpec>& equation_specs,
                             int delay_min,
                             int delay_max) {
   const int num_scanned_points = GetNumScannedPoints(delay_min, delay_max);
   const int kNumOffsets = num_scanned_points * 2;
   const int kNumParameters = kNumUnknowns + kNumOffsets;
-  const int num_rows = kNumObservedBins * num_scanned_points;
+  const int num_rows = static_cast<int>(equation_specs.size());
 
   matrix_a->ResizeTo(num_rows, kNumParameters);
   matrix_a->Zero();
 
   for (int row = 0; row < num_rows; ++row) {
-    const ObservationIndex& observation = observation_indices[row];
-    const int window_bin = observation.window_bin;
-    const int actual_bin = observation.hist_bin;
-    const int d = observation.delay - delay_min;
+    const EquationSpec& equation = equation_specs[row];
 
-    const int j_start = kUnknownBlockSize * window_bin + d - (kUnknownBlockSize - 1);
-    const int j_end = kUnknownBlockSize * window_bin + d;
-
-    for (int j = j_start; j <= j_end; ++j) {
-      if (1 <= j && j <= kNumUnknowns) {
-        (*matrix_a)(row, j - 1) = 1.0;
+    for (int unknown_index : equation.unknown_indices) {
+      if (0 <= unknown_index && unknown_index < kNumUnknowns) {
+        (*matrix_a)(row, unknown_index) = 1.0;
+      } else {
+        std::cerr << "ERROR: Unknown index out of range in row " << row << std::endl;
+        exit(1);
       }
     }
 
-    const int delay_offset_index = GetOffsetIndexFromDelay(observation.delay, delay_min);
-    const int parity_index = GetParityIndex(actual_bin);
-    const int offset_col = kNumUnknowns + 2 * delay_offset_index + parity_index;
+    const int delay_offset_index = GetOffsetIndexFromDelay(equation.observation.delay, delay_min);
+    const int offset_col = kNumUnknowns + 2 * delay_offset_index + equation.offset_parity_index;
     (*matrix_a)(row, offset_col) = 1.0;
   }
 }
@@ -149,24 +206,23 @@ void SaveSolvedHistogram(const TVectorD& solved_n) {
 
 bool SolveShiftedSumWeighted(const TVectorD& measured_n,
                              const TVectorD& measured_sigma,
-                             const std::vector<ObservationIndex>& observation_indices,
+                             const std::vector<EquationSpec>& equation_specs,
                              TVectorD* solved_n,
                              TMatrixD* covariance_matrix,
                              TMatrixD* coefficient_matrix = nullptr) {
   const int num_scanned_points = GetNumScannedPoints(kDelayMin, kDelayMax);
   const int kNumOffsets = num_scanned_points * 2;
   const int kNumParameters = kNumUnknowns + kNumOffsets;
-  const int kNumObservations = kNumObservedBins * num_scanned_points;
+  const int kNumObservations = static_cast<int>(equation_specs.size());
 
   if (measured_n.GetNrows() != kNumObservations ||
-      measured_sigma.GetNrows() != kNumObservations ||
-      static_cast<int>(observation_indices.size()) != kNumObservations) {
+      measured_sigma.GetNrows() != kNumObservations) {
     std::cerr << "Input vector size mismatch." << std::endl;
     return false;
   }
 
   TMatrixD matrix_a;
-  BuildCoefficientMatrix(&matrix_a, observation_indices, kDelayMin, kDelayMax);
+  BuildCoefficientMatrix(&matrix_a, equation_specs, kDelayMin, kDelayMax);
   if (coefficient_matrix != nullptr) {
     coefficient_matrix->ResizeTo(matrix_a);
     *coefficient_matrix = matrix_a;
@@ -218,13 +274,13 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
 
 void PrintSolvedEquations(const TMatrixD& matrix_a,
                           const TVectorD& measured_n,
-                          const std::vector<ObservationIndex>& observation_indices) {
+                          const std::vector<EquationSpec>& equation_specs) {
   const int num_scanned_points = GetNumScannedPoints(kDelayMin, kDelayMax);
   const int kNumOffsets = num_scanned_points * 2;
-  const int kNumObservations = kNumObservedBins * num_scanned_points;
+  const int kNumObservations = static_cast<int>(equation_specs.size());
 
   for (int row = 0; row < kNumObservations; ++row) {
-    const ObservationIndex& observation = observation_indices[row];
+    const ObservationIndex& observation = equation_specs[row].observation;
     std::cout << "N_{window_bin=" << observation.window_bin
               << ", hist_bin=" << observation.hist_bin
               << ", delay=" << observation.delay << "} = ";
@@ -294,12 +350,11 @@ void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) 
 }
 
 void SolveShiftedSum() {
-  const int num_scanned_points = GetNumScannedPoints(kDelayMin, kDelayMax);
-  const int kNumObservations = kNumObservedBins * num_scanned_points;
+  const std::vector<EquationSpec> equation_specs = LoadEquationSpecs(kEquationSpecPath);
+  const int kNumObservations = static_cast<int>(equation_specs.size());
 
   TVectorD measured_n(kNumObservations);
   TVectorD measured_sigma(kNumObservations);
-  std::vector<ObservationIndex> observation_indices(kNumObservations);
 
   measured_n.Zero();
   measured_sigma.Zero();
@@ -308,40 +363,31 @@ void SolveShiftedSum() {
     measured_sigma(row) = 0.01;
   }
 
-  for (int delay = kDelayMin; delay <= kDelayMax; ++delay) {
-    if (delay == 111) {
-      continue; /* skip L1delay=111 since we don't have such run */
-    }
-    const int run = GetRunFromDelayValue(delay);
+  for (int row = 0; row < kNumObservations; ++row) {
+    const ObservationIndex& observation = equation_specs[row].observation;
+    const int run = GetRunFromDelayValue(observation.delay);
     std::string filename = Form("/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/input/run%d.root", run);
-    TFile* file = TFile::Open(filename.c_str(), "update");
+    TFile* file = TFile::Open(filename.c_str(), "READ");
     if (!file || file->IsZombie()) {
       std::cerr << "ERROR: Could not open " << filename << std::endl;
       exit(1);
     }
 
     TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted");
-    // TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted_minus_plateau");
     if (h_bco_diff_shifted == nullptr) {
-      std::cerr << "ERROR: histogram h_bco_diff_shifted_minus_plateau is missing in "
+      std::cerr << "ERROR: histogram h_bco_diff_shifted is missing in "
                 << filename << std::endl;
       exit(1);
     }
 
-    if (h_bco_diff_shifted->GetNbinsX() < kNumObservedBins) {
-      std::cerr << "ERROR: histogram has fewer than " << kNumObservedBins
+    if (h_bco_diff_shifted->GetNbinsX() < observation.hist_bin) {
+      std::cerr << "ERROR: histogram has fewer than " << observation.hist_bin
                 << " bins in " << filename << std::endl;
       exit(1);
     }
 
-    const int first_bin = GetPeakWindowStartBin(h_bco_diff_shifted);
-    const int d = delay - kDelayMin;
-    for (int local_bin = 0; local_bin < kNumObservedBins; ++local_bin) {
-      const int actual_bin = first_bin + local_bin;
-      const int row = GetRowIndex(local_bin + 1, d, 0, num_scanned_points);
-      observation_indices[row] = {local_bin + 1, actual_bin, delay};
-      measured_n(row) = h_bco_diff_shifted->GetBinContent(actual_bin);
-    }
+    measured_n(row) = h_bco_diff_shifted->GetBinContent(observation.hist_bin);
+    file->Close();
   }
 
   TVectorD solved_n;
@@ -349,7 +395,7 @@ void SolveShiftedSum() {
   TMatrixD coefficient_matrix;
 
   const bool success = SolveShiftedSumWeighted(
-      measured_n, measured_sigma, observation_indices,
+      measured_n, measured_sigma, equation_specs,
       &solved_n, &covariance_matrix, &coefficient_matrix);
 
   if (!success) {
@@ -357,7 +403,7 @@ void SolveShiftedSum() {
     return;
   }
 
-  PrintSolvedEquations(coefficient_matrix, measured_n, observation_indices);
+  PrintSolvedEquations(coefficient_matrix, measured_n, equation_specs);
   PrintSolution(solved_n, covariance_matrix);
   SaveSolvedHistogram(solved_n);
 }
