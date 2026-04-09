@@ -2,8 +2,12 @@
 #include <iostream>
 #include <vector>
 
+#include "TCanvas.h"
 #include "TDecompSVD.h"
+#include "TFile.h"
+#include "TH1D.h"
 #include "TMatrixD.h"
+#include "TSystem.h"
 #include "TVectorD.h"
 
 struct ObservationIndex {
@@ -70,6 +74,35 @@ void BuildCoefficientMatrix(TMatrixD* matrix_a, int d_min, int d_max) {
       (*matrix_a)(row, offset_col) = 1.0;
     }
   }
+}
+
+void SaveSolvedHistogram(const TVectorD& solved_n) {
+  const int kNumUnknowns = 42;
+  const char* output_dir =
+      "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/output";
+  const char* root_filename =
+      "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/output/solved_n.root";
+  const char* pdf_filename =
+      "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/output/solved_n.pdf";
+
+  gSystem->mkdir(output_dir, true);
+
+  TH1D* h_solved_n = new TH1D("h_solved_n", "Solved n;bin index i;solved_n[i]",
+                              kNumUnknowns, 0.5, kNumUnknowns + 0.5);
+  for (int i = 0; i < kNumUnknowns; ++i) {
+    h_solved_n->SetBinContent(i + 1, solved_n(i));
+  }
+
+  TFile output_file(root_filename, "RECREATE");
+  h_solved_n->Write();
+  output_file.Close();
+
+  TCanvas canvas("c_solved_n", "c_solved_n", 900, 600);
+  h_solved_n->SetStats(0);
+  h_solved_n->Draw("HIST");
+  canvas.SaveAs(pdf_filename);
+
+  delete h_solved_n;
 }
 
 bool SolveShiftedSumWeighted(const TVectorD& measured_n,
@@ -271,6 +304,7 @@ void SolveShiftedSum() {
 
   PrintSolvedEquations(coefficient_matrix, measured_n);
   PrintSolution(solved_n, covariance_matrix);
+  SaveSolvedHistogram(solved_n);
 }
 
 
