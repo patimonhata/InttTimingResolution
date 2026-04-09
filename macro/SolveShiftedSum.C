@@ -18,6 +18,8 @@ struct ObservationIndex {
 int GetRunFromDelayValue(int delay);
 int GetOffsetIndexFromDelay(int delay, int delay_min);
 int GetDelayFromOffsetIndex(int offset_index, int delay_min);
+int GetParityIndex(int bin);
+const char* GetParityName(int parity_index);
 
 int GetRowIndex(int i, int delay, int delay_min, int num_scanned_points) {
   if (delay < 5){ /* L1delay 111 = 106+5*/
@@ -45,11 +47,19 @@ int GetDelayFromOffsetIndex(int offset_index, int delay_min) {
   return delay;
 }
 
+int GetParityIndex(int bin) {
+  return (bin % 2 == 0) ? 1 : 0;
+}
+
+const char* GetParityName(int parity_index) {
+  return (parity_index == 0) ? "odd" : "even";
+}
+
 void BuildCoefficientMatrix(TMatrixD* matrix_a, int d_min, int d_max) {
   const int kNumUnknowns = 42;
   const int kNumGroups = 7;
   const int num_scanned_points = d_max - d_min + 1 -1; /* -1 due to lack of a run with L1delay-111 */
-  const int kNumOffsets = num_scanned_points;
+  const int kNumOffsets = num_scanned_points * 2;
   const int kNumParameters = kNumUnknowns + kNumOffsets;
   const int num_rows = kNumGroups * num_scanned_points;
 
@@ -70,7 +80,9 @@ void BuildCoefficientMatrix(TMatrixD* matrix_a, int d_min, int d_max) {
         }
       }
 
-      const int offset_col = kNumUnknowns + GetOffsetIndexFromDelay(d, d_min);
+      const int delay_offset_index = GetOffsetIndexFromDelay(d, d_min);
+      const int parity_index = GetParityIndex(i);
+      const int offset_col = kNumUnknowns + 2 * delay_offset_index + parity_index;
       (*matrix_a)(row, offset_col) = 1.0;
     }
   }
@@ -115,7 +127,7 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   const int kDelayMax = 127;
   const int kNumGroups = 7;
   const int num_scanned_points = kDelayMax - kDelayMin + 1 -1; /* -1 due to lack of a run with L1delay-111 */
-  const int kNumOffsets = num_scanned_points;
+  const int kNumOffsets = num_scanned_points * 2;
   const int kNumParameters = kNumUnknowns + kNumOffsets;
   const int kNumObservations = kNumGroups * num_scanned_points;
 
@@ -181,7 +193,7 @@ void PrintSolvedEquations(const TMatrixD& matrix_a, const TVectorD& measured_n) 
   const int kDelayMin = 106;
   const int kDelayMax = 127;
   const int kNumGroups = 7;
-  const int kNumOffsets = kDelayMax - kDelayMin + 1 - 1;
+  const int kNumOffsets = (kDelayMax - kDelayMin + 1 - 1) * 2;
   const int num_scanned_points = kDelayMax - kDelayMin + 1 - 1; /* -1 due to lack of a run with L1delay-111 */
 
   for (int delay = kDelayMin; delay <= kDelayMax; ++delay) {
@@ -215,9 +227,12 @@ void PrintSolvedEquations(const TMatrixD& matrix_a, const TVectorD& measured_n) 
         if (col < kNumUnknowns) {
           std::cout << "n_" << col + 1;
         } else if (col < kNumUnknowns + kNumOffsets) {
-          const int offset_delay = GetDelayFromOffsetIndex(col - kNumUnknowns, kDelayMin);
+          const int local_offset_index = col - kNumUnknowns;
+          const int offset_delay = GetDelayFromOffsetIndex(local_offset_index / 2, kDelayMin);
+          const int parity_index = local_offset_index % 2;
           const int run = GetRunFromDelayValue(offset_delay);
-          std::cout << "offset_delay" << offset_delay << "_run" << run;
+          std::cout << "offset_delay" << offset_delay << "_run" << run
+                    << "_" << GetParityName(parity_index);
         } else {
           std::cout << "parameter_" << col + 1;
         }
@@ -236,7 +251,7 @@ void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) 
   const int kNumUnknowns = 42;
   const int kDelayMin = 106;
   const int kDelayMax = 127;
-  const int kNumOffsets = kDelayMax - kDelayMin + 1 - 1;
+  const int kNumOffsets = (kDelayMax - kDelayMin + 1 - 1) * 2;
 
   for (int j = 1; j <= kNumUnknowns; ++j) {
     const double value = solved_n(j - 1);
@@ -246,11 +261,14 @@ void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) 
   }
 
   for (int i = 0; i < kNumOffsets; ++i) {
-    const int delay = GetDelayFromOffsetIndex(i, kDelayMin);
+    const int delay = GetDelayFromOffsetIndex(i / 2, kDelayMin);
+    const int parity_index = i % 2;
     const int run = GetRunFromDelayValue(delay);
     const double offset = solved_n(kNumUnknowns + i);
     const double offset_error = std::sqrt(covariance_matrix(kNumUnknowns + i, kNumUnknowns + i));
-    std::cout << "offset_delay" << delay << "_run" << run << " = " << offset
+    std::cout << "offset_delay" << delay << "_run" << run
+              << "_" << GetParityName(parity_index)
+              << " = " << offset
               << " +/- " << offset_error << std::endl;
   }
 }
@@ -286,6 +304,7 @@ void SolveShiftedSum() {
       exit(1);
     }
     for (int bin=1; bin <= 7; bin++) {
+      // TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted");
       TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted_minus_plateau");
       measured_n(GetRowIndex(bin, delay-106, kDelayMin-106, num_scanned_points)) = h_bco_diff_shifted->GetBinContent(bin);
     }
