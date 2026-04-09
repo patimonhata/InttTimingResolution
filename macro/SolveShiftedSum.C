@@ -124,6 +124,42 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   return true;
 }
 
+void PrintSolvedEquations(const TVectorD& measured_n) {
+  const int kDelayMin = 106;
+  const int kDelayMax = 127;
+  const int kNumGroups = 7;
+  const int num_scanned_points = kDelayMax - kDelayMin + 1 - 1; /* -1 due to lack of a run with L1delay-111 */
+
+  for (int delay = kDelayMin; delay <= kDelayMax; ++delay) {
+    if (delay == 111) {
+      continue;
+    }
+
+    const int d = delay - kDelayMin;
+    for (int i = 1; i <= kNumGroups; ++i) {
+      const int row = GetRowIndex(i, d, 0, num_scanned_points);
+      const int j_start = 6 * i + d - 5;
+      const int j_end = 6 * i + d;
+
+      std::cout << "N_" << i << "^{delay=" << delay << "} = ";
+
+      bool first_term = true;
+      for (int j = j_start; j <= j_end; ++j) {
+        if (j < 1 || j > 42) {
+          continue;
+        }
+        if (!first_term) {
+          std::cout << " + ";
+        }
+        std::cout << "n_" << j;
+        first_term = false;
+      }
+
+      std::cout << " = " << measured_n(row) << std::endl;
+    }
+  }
+}
+
 void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) {
   // const int kNumUnknowns = 18;
   const int kNumUnknowns = 42;
@@ -190,6 +226,7 @@ void SolveShiftedSum() {
     return;
   }
 
+  PrintSolvedEquations(measured_n);
   PrintSolution(solved_n, covariance_matrix);
 }
 
