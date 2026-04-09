@@ -126,7 +126,7 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
       std::cerr << "ERROR: Run mismatch in equation line: " << line << std::endl;
       exit(1);
     }
-    if (spec.observation.window_bin < 1 || spec.observation.window_bin > 5) {
+    if (spec.observation.window_bin < 1) {
       std::cerr << "ERROR: Unexpected window_bin in equation line: " << line << std::endl;
       exit(1);
     }
