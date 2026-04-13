@@ -42,6 +42,121 @@ int GetParityIndex(int bin);
 const char* GetParityName(int parity_index);
 int GetNumScannedPoints(int delay_min, int delay_max);
 std::vector<EquationSpec> LoadEquationSpecs(const std::string& path);
+void BuildCoefficientMatrix(TMatrixD* matrix_a, const std::vector<EquationSpec>& equation_specs, int delay_min, int delay_max);
+void SaveSolvedHistogram(const TVectorD& solved_n);
+bool SolveShiftedSumWeighted(const TVectorD& measured_n, const TVectorD& measured_sigma, const std::vector<EquationSpec>& equation_specs, TVectorD* solved_n, TMatrixD* covariance_matrix, TMatrixD* coefficient_matrix = nullptr);
+void PrintSolvedEquations(const TMatrixD& matrix_a, const TVectorD& measured_n, const std::vector<EquationSpec>& equation_specs);
+void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix);
+
+
+
+void SolveShiftedSum() {
+  const std::vector<EquationSpec> equation_specs = LoadEquationSpecs(kEquationSpecPath);
+  const int kNumObservations = static_cast<int>(equation_specs.size());
+
+  TVectorD measured_n(kNumObservations);
+  TVectorD measured_sigma(kNumObservations);
+
+  measured_n.Zero();
+  measured_sigma.Zero();
+
+  for (int row = 0; row < kNumObservations; ++row) {
+    measured_sigma(row) = 0.01;
+  }
+
+  for (int row = 0; row < kNumObservations; ++row) {
+    const ObservationIndex& observation = equation_specs[row].observation;
+    const int run = GetRunFromDelayValue(observation.delay);
+    std::string filename = Form("/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/input/run%d.root", run);
+    TFile* file = TFile::Open(filename.c_str(), "READ");
+    if (!file || file->IsZombie()) {
+      std::cerr << "ERROR: Could not open " << filename << std::endl;
+      exit(1);
+    }
+
+    TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted");
+    if (h_bco_diff_shifted == nullptr) {
+      std::cerr << "ERROR: histogram h_bco_diff_shifted is missing in "
+                << filename << std::endl;
+      exit(1);
+    }
+
+    if (h_bco_diff_shifted->GetNbinsX() < observation.hist_bin) {
+      std::cerr << "ERROR: histogram has fewer than " << observation.hist_bin
+                << " bins in " << filename << std::endl;
+      exit(1);
+    }
+
+    measured_n(row) = h_bco_diff_shifted->GetBinContent(observation.hist_bin);
+    file->Close();
+  }
+
+  TVectorD solved_n;
+  TMatrixD covariance_matrix;
+  TMatrixD coefficient_matrix;
+
+  const bool success = SolveShiftedSumWeighted(
+      measured_n, measured_sigma, equation_specs,
+      &solved_n, &covariance_matrix, &coefficient_matrix);
+
+  if (!success) {
+    std::cerr << "Fit failed." << std::endl;
+    return;
+  }
+
+  PrintSolvedEquations(coefficient_matrix, measured_n, equation_specs);
+  PrintSolution(solved_n, covariance_matrix);
+  SaveSolvedHistogram(solved_n);
+}
+
+
+int GetRunFromDelayValue(int delay) {
+  std::vector< pair<int, int> > run_L1delay_list_scan6 = {
+    {43291, 127},
+    {43288, 126},
+    {43285, 125},
+    {43283, 124},
+    {43282, 123},
+    {43280, 122},
+    {43278, 121},
+    {43276, 120},
+    {43313, 119}
+  };
+  std::vector< pair<int, int> > run_L1delay_list_scan7 = {
+    {43408, 120},
+    {43410, 119},
+    {43412, 118},
+    {43413, 117},
+    {43414, 116},
+    {43415, 115},
+    {43417, 114},
+    {43421, 113},
+    {43426, 112},
+    // {43441, 111}, /* 111 does not exist ! later delete */
+    {43441, 110},
+    {43434, 109},
+    {43436, 108},
+    {43438, 107},
+    {43440, 106},
+  };
+
+  for (int i=0; i<run_L1delay_list_scan6.size(); i++) {
+    int run = run_L1delay_list_scan6[i].first;
+    int l1_delay = run_L1delay_list_scan6[i].second;
+    if (delay==l1_delay) {
+      return run;
+    }
+  }
+
+  for (int i=0; i<run_L1delay_list_scan7.size(); i++) {
+    int run = run_L1delay_list_scan7[i].first;
+    int l1_delay = run_L1delay_list_scan7[i].second;
+    if (delay==l1_delay) {
+      return run;
+    }
+  }
+  return -1;
+}
 
 int GetNumScannedPoints(int delay_min, int delay_max) {
   return delay_max - delay_min + 1 - 1; /* -1 due to lack of a run with L1delay-111 */
@@ -262,13 +377,14 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   Bool_t invert_ok = kFALSE;
 
   covariance_matrix->ResizeTo(kNumParameters, kNumParameters);
-  *covariance_matrix = normal_svd.Invert(invert_ok);
+  *covariance_matrix = normal_svd.Invert(invert_ok); /* (A^{T}*A)^{-1} */
 
   if (!invert_ok) {
     std::cerr << "Failed to invert normal matrix." << std::endl;
     return false;
   }
 
+  /* Solution of the linear equations, that is (A^{T}*A)^{-1} * A^{T} * measured_n, will be calculated in  */
   return true;
 }
 
@@ -329,6 +445,7 @@ void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) 
   const int num_scanned_points = GetNumScannedPoints(kDelayMin, kDelayMax);
   const int kNumOffsets = num_scanned_points * 2;
 
+  /* Fine timing distribution part */
   for (int j = 1; j <= kNumUnknowns; ++j) {
     const double value = solved_n(j - 1);
     const double error = std::sqrt(covariance_matrix(j - 1, j - 1));
@@ -336,6 +453,7 @@ void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) 
               << " +/- " << error << std::endl;
   }
 
+  /* Offset part */
   for (int i = 0; i < kNumOffsets; ++i) {
     const int delay = GetDelayFromOffsetIndex(i / 2, kDelayMin);
     const int parity_index = i % 2;
@@ -347,112 +465,4 @@ void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) 
               << " = " << offset
               << " +/- " << offset_error << std::endl;
   }
-}
-
-void SolveShiftedSum() {
-  const std::vector<EquationSpec> equation_specs = LoadEquationSpecs(kEquationSpecPath);
-  const int kNumObservations = static_cast<int>(equation_specs.size());
-
-  TVectorD measured_n(kNumObservations);
-  TVectorD measured_sigma(kNumObservations);
-
-  measured_n.Zero();
-  measured_sigma.Zero();
-
-  for (int row = 0; row < kNumObservations; ++row) {
-    measured_sigma(row) = 0.01;
-  }
-
-  for (int row = 0; row < kNumObservations; ++row) {
-    const ObservationIndex& observation = equation_specs[row].observation;
-    const int run = GetRunFromDelayValue(observation.delay);
-    std::string filename = Form("/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/input/run%d.root", run);
-    TFile* file = TFile::Open(filename.c_str(), "READ");
-    if (!file || file->IsZombie()) {
-      std::cerr << "ERROR: Could not open " << filename << std::endl;
-      exit(1);
-    }
-
-    TH1D* h_bco_diff_shifted = (TH1D*)file->Get("h_bco_diff_shifted");
-    if (h_bco_diff_shifted == nullptr) {
-      std::cerr << "ERROR: histogram h_bco_diff_shifted is missing in "
-                << filename << std::endl;
-      exit(1);
-    }
-
-    if (h_bco_diff_shifted->GetNbinsX() < observation.hist_bin) {
-      std::cerr << "ERROR: histogram has fewer than " << observation.hist_bin
-                << " bins in " << filename << std::endl;
-      exit(1);
-    }
-
-    measured_n(row) = h_bco_diff_shifted->GetBinContent(observation.hist_bin);
-    file->Close();
-  }
-
-  TVectorD solved_n;
-  TMatrixD covariance_matrix;
-  TMatrixD coefficient_matrix;
-
-  const bool success = SolveShiftedSumWeighted(
-      measured_n, measured_sigma, equation_specs,
-      &solved_n, &covariance_matrix, &coefficient_matrix);
-
-  if (!success) {
-    std::cerr << "Fit failed." << std::endl;
-    return;
-  }
-
-  PrintSolvedEquations(coefficient_matrix, measured_n, equation_specs);
-  PrintSolution(solved_n, covariance_matrix);
-  SaveSolvedHistogram(solved_n);
-}
-
-
-int GetRunFromDelayValue(int delay) {
-  std::vector< pair<int, int> > run_L1delay_list_scan6 = {
-    {43291, 127},
-    {43288, 126},
-    {43285, 125},
-    {43283, 124},
-    {43282, 123},
-    {43280, 122},
-    {43278, 121},
-    {43276, 120},
-    {43313, 119}
-  };
-  std::vector< pair<int, int> > run_L1delay_list_scan7 = {
-    {43408, 120},
-    {43410, 119},
-    {43412, 118},
-    {43413, 117},
-    {43414, 116},
-    {43415, 115},
-    {43417, 114},
-    {43421, 113},
-    {43426, 112},
-    // {43441, 111}, /* 111 does not exist ! later delete */
-    {43441, 110},
-    {43434, 109},
-    {43436, 108},
-    {43438, 107},
-    {43440, 106},
-  };
-
-  for (int i=0; i<run_L1delay_list_scan6.size(); i++) {
-    int run = run_L1delay_list_scan6[i].first;
-    int l1_delay = run_L1delay_list_scan6[i].second;
-    if (delay==l1_delay) {
-      return run;
-    }
-  }
-
-  for (int i=0; i<run_L1delay_list_scan7.size(); i++) {
-    int run = run_L1delay_list_scan7[i].first;
-    int l1_delay = run_L1delay_list_scan7[i].second;
-    if (delay==l1_delay) {
-      return run;
-    }
-  }
-  return -1;
 }
