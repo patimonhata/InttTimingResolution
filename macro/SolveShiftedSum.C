@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <regex>
 #include <string>
 #include <vector>
@@ -19,16 +21,16 @@ struct ObservationIndex {
   int delay;
 };
 
+struct OffsetTerm {
+  std::string label;
+  double coefficient;
+};
+
 struct EquationSpec {
   ObservationIndex observation;
-  int offset_parity_index;
   std::vector<int> unknown_indices;
+  std::vector<OffsetTerm> offset_terms;
 };
-//  Example: 
-//     For a line, N_{window_bin=1, hist_bin=2, delay=106} = n_1 + n_2 + n_3 + n_4 + n_5 + n_6 + offset_delay106_run43440_even = 1.20336,
-//     observation.window_bin=1, observation.hist_bin=2, observation.delay=106, 
-//     offset_parity_index=0,
-//     and unknown_indices={0,1,2,3,4,5} (index-1)
 
 namespace {
 constexpr int kDelayMin = 106;
@@ -41,22 +43,30 @@ const char* kEquationSpecPath =
 }
 
 int GetRunFromDelayValue(int delay);
-int GetOffsetIndexFromDelay(int delay, int delay_min);
-int GetDelayFromOffsetIndex(int offset_index, int delay_min);
-int GetParityIndex(int bin);
-const char* GetParityName(int parity_index);
-int GetNumScannedPoints(int delay_min, int delay_max);
 std::vector<EquationSpec> LoadEquationSpecs(const std::string& path);
-void BuildCoefficientMatrix(TMatrixD* matrix_a, const std::vector<EquationSpec>& equation_specs, int delay_min, int delay_max);
+std::vector<std::string> CollectOffsetLabels(const std::vector<EquationSpec>& equation_specs);
+void BuildCoefficientMatrix(TMatrixD* matrix_a,
+                            const std::vector<EquationSpec>& equation_specs,
+                            const std::vector<std::string>& offset_labels);
 void SaveSolvedHistogram(const TVectorD& solved_n);
-bool SolveShiftedSumWeighted(const TVectorD& measured_n, const TVectorD& measured_sigma, const std::vector<EquationSpec>& equation_specs, TVectorD* solved_n, TMatrixD* covariance_matrix, TMatrixD* coefficient_matrix = nullptr);
-void PrintSolvedEquations(const TMatrixD& matrix_a, const TVectorD& measured_n, const std::vector<EquationSpec>& equation_specs);
-void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix);
-
-
+bool SolveShiftedSumWeighted(const TVectorD& measured_n,
+                             const TVectorD& measured_sigma,
+                             const std::vector<EquationSpec>& equation_specs,
+                             const std::vector<std::string>& offset_labels,
+                             TVectorD* solved_n,
+                             TMatrixD* covariance_matrix,
+                             TMatrixD* coefficient_matrix = nullptr);
+void PrintSolvedEquations(const TMatrixD& matrix_a,
+                          const TVectorD& measured_n,
+                          const std::vector<EquationSpec>& equation_specs,
+                          const std::vector<std::string>& offset_labels);
+void PrintSolution(const TVectorD& solved_n,
+                   const TMatrixD& covariance_matrix,
+                   const std::vector<std::string>& offset_labels);
 
 void SolveShiftedSum() {
   const std::vector<EquationSpec> equation_specs = LoadEquationSpecs(kEquationSpecPath);
+  const std::vector<std::string> offset_labels = CollectOffsetLabels(equation_specs);
   const int kNumObservations = static_cast<int>(equation_specs.size());
 
   TVectorD measured_n(kNumObservations);
@@ -72,7 +82,9 @@ void SolveShiftedSum() {
   for (int row = 0; row < kNumObservations; ++row) {
     const ObservationIndex& observation = equation_specs[row].observation;
     const int run = GetRunFromDelayValue(observation.delay);
-    std::string filename = Form("/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/input/run%d.root", run);
+    std::string filename = Form(
+        "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/input/run%d.root",
+        run);
     TFile* file = TFile::Open(filename.c_str(), "READ");
     if (!file || file->IsZombie()) {
       std::cerr << "ERROR: Could not open " << filename << std::endl;
@@ -101,22 +113,26 @@ void SolveShiftedSum() {
   TMatrixD coefficient_matrix;
 
   const bool success = SolveShiftedSumWeighted(
-      measured_n, measured_sigma, equation_specs,
-      &solved_n, &covariance_matrix, &coefficient_matrix);
+      measured_n,
+      measured_sigma,
+      equation_specs,
+      offset_labels,
+      &solved_n,
+      &covariance_matrix,
+      &coefficient_matrix);
 
   if (!success) {
     std::cerr << "Fit failed." << std::endl;
     return;
   }
 
-  PrintSolvedEquations(coefficient_matrix, measured_n, equation_specs);
-  PrintSolution(solved_n, covariance_matrix);
+  PrintSolvedEquations(coefficient_matrix, measured_n, equation_specs, offset_labels);
+  PrintSolution(solved_n, covariance_matrix, offset_labels);
   SaveSolvedHistogram(solved_n);
 }
 
-
 int GetRunFromDelayValue(int delay) {
-  std::vector< pair<int, int> > run_L1delay_list_scan6 = {
+  std::vector< std::pair<int, int> > run_L1delay_list_scan6 = {
     {43291, 127},
     {43288, 126},
     {43285, 125},
@@ -127,7 +143,7 @@ int GetRunFromDelayValue(int delay) {
     {43276, 120},
     {43313, 119}
   };
-  std::vector< pair<int, int> > run_L1delay_list_scan7 = {
+  std::vector< std::pair<int, int> > run_L1delay_list_scan7 = {
     {43408, 120},
     {43410, 119},
     {43412, 118},
@@ -137,7 +153,6 @@ int GetRunFromDelayValue(int delay) {
     {43417, 114},
     {43421, 113},
     {43426, 112},
-    // {43441, 111}, /* 111 does not exist ! later delete */
     {43441, 110},
     {43434, 109},
     {43436, 108},
@@ -145,51 +160,18 @@ int GetRunFromDelayValue(int delay) {
     {43440, 106},
   };
 
-  for (int i=0; i<run_L1delay_list_scan6.size(); i++) {
-    int run = run_L1delay_list_scan6[i].first;
-    int l1_delay = run_L1delay_list_scan6[i].second;
-    if (delay==l1_delay) {
-      return run;
+  for (int i = 0; i < static_cast<int>(run_L1delay_list_scan6.size()); ++i) {
+    if (delay == run_L1delay_list_scan6[i].second) {
+      return run_L1delay_list_scan6[i].first;
     }
   }
 
-  for (int i=0; i<run_L1delay_list_scan7.size(); i++) {
-    int run = run_L1delay_list_scan7[i].first;
-    int l1_delay = run_L1delay_list_scan7[i].second;
-    if (delay==l1_delay) {
-      return run;
+  for (int i = 0; i < static_cast<int>(run_L1delay_list_scan7.size()); ++i) {
+    if (delay == run_L1delay_list_scan7[i].second) {
+      return run_L1delay_list_scan7[i].first;
     }
   }
   return -1;
-}
-
-int GetNumScannedPoints(int delay_min, int delay_max) {
-  return delay_max - delay_min + 1 - 1; /* -1 due to lack of a run with L1delay-111 */
-}
-
-int GetOffsetIndexFromDelay(int delay, int delay_min) {
-  const int skipped_delay = delay_min + 5;
-  if (delay < skipped_delay) {
-    return delay - delay_min;
-  }
-  return delay - 1 - delay_min;
-}
-
-int GetDelayFromOffsetIndex(int offset_index, int delay_min) {
-  const int skipped_delay = delay_min + 5;
-  int delay = delay_min + offset_index;
-  if (delay >= skipped_delay) {
-    delay += 1;
-  }
-  return delay;
-}
-
-int GetParityIndex(int bin) {
-  return (bin % 2 == 0) ? 1 : 0;
-}
-
-const char* GetParityName(int parity_index) {
-  return (parity_index == 0) ? "odd" : "even";
 }
 
 std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
@@ -199,9 +181,12 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
     exit(1);
   }
 
-  const std::regex prefix_regex(R"(^N_\{window_bin=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
+  const std::regex prefix_regex(
+      R"(^N_\{window_bin=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
   const std::regex unknown_regex(R"(n_(\d+))");
-  const std::regex offset_regex(R"(offset_delay(\d+)_run(\d+)_(odd|even))");
+  const std::regex offset_term_regex(
+      R"(((?:\d+(?:\.\d+)?)\s*\*\s*)?(offset_[A-Za-z0-9_]+))");
+  const std::regex offset_identity_regex(R"(offset_delay(\d+)_run(\d+).*)");
 
   std::vector<EquationSpec> equation_specs;
   std::string line;
@@ -221,30 +206,56 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
     spec.observation.hist_bin = std::stoi(prefix_match[2].str());
     spec.observation.delay = std::stoi(prefix_match[3].str());
 
-    const std::string right_hand_side = prefix_match[4].str();
-    for (std::sregex_iterator it(right_hand_side.begin(), right_hand_side.end(), unknown_regex), end; it != end; ++it) {
+    std::string right_hand_side = prefix_match[4].str();
+    const std::size_t value_separator = right_hand_side.rfind(" = ");
+    if (value_separator != std::string::npos) {
+      right_hand_side = right_hand_side.substr(0, value_separator);
+    }
+
+    for (std::sregex_iterator it(right_hand_side.begin(), right_hand_side.end(), unknown_regex), end;
+         it != end; ++it) {
       spec.unknown_indices.push_back(std::stoi((*it)[1].str()) - 1);
     }
 
-    std::smatch offset_match;
-    if (!std::regex_search(right_hand_side, offset_match, offset_regex)) {
-      std::cerr << "ERROR: Missing offset term in equation line: " << line << std::endl;
-      exit(1);
+    for (std::sregex_iterator it(right_hand_side.begin(), right_hand_side.end(), offset_term_regex), end;
+         it != end; ++it) {
+      const std::string coefficient_text = (*it)[1].matched ? (*it)[1].str() : "";
+      const std::string label = (*it)[2].str();
+
+      double coefficient = 1.0;
+      if (!coefficient_text.empty()) {
+        std::string cleaned = coefficient_text;
+        cleaned.erase(std::remove(cleaned.begin(), cleaned.end(), ' '), cleaned.end());
+        if (!cleaned.empty() && cleaned.back() == '*') {
+          cleaned.pop_back();
+        }
+        coefficient = std::stod(cleaned);
+      }
+
+      std::smatch offset_identity_match;
+      if (std::regex_match(label, offset_identity_match, offset_identity_regex)) {
+        const int offset_delay = std::stoi(offset_identity_match[1].str());
+        const int offset_run = std::stoi(offset_identity_match[2].str());
+        if (offset_delay != spec.observation.delay) {
+          std::cerr << "ERROR: Delay mismatch in equation line: " << line << std::endl;
+          exit(1);
+        }
+        if (GetRunFromDelayValue(offset_delay) != offset_run) {
+          std::cerr << "ERROR: Run mismatch in equation line: " << line << std::endl;
+          exit(1);
+        }
+      }
+
+      spec.offset_terms.push_back({label, coefficient});
     }
 
-    const int offset_delay = std::stoi(offset_match[1].str());
-    const int offset_run = std::stoi(offset_match[2].str());
-    const std::string parity_name = offset_match[3].str();
-    spec.offset_parity_index = (parity_name == "odd") ? 0 : 1;
+    for (int unknown_index : spec.unknown_indices) {
+      if (unknown_index < 0 || unknown_index >= kNumUnknowns) {
+        std::cerr << "ERROR: Unknown index out of range in equation line: " << line << std::endl;
+        exit(1);
+      }
+    }
 
-    if (offset_delay != spec.observation.delay) {
-      std::cerr << "ERROR: Delay mismatch in equation line: " << line << std::endl;
-      exit(1);
-    }
-    if (GetRunFromDelayValue(offset_delay) != offset_run) {
-      std::cerr << "ERROR: Run mismatch in equation line: " << line << std::endl;
-      exit(1);
-    }
     if (spec.observation.window_bin < 1) {
       std::cerr << "ERROR: Unexpected window_bin in equation line: " << line << std::endl;
       exit(1);
@@ -265,14 +276,32 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
   return equation_specs;
 }
 
+std::vector<std::string> CollectOffsetLabels(const std::vector<EquationSpec>& equation_specs) {
+  std::vector<std::string> labels;
+  std::map<std::string, int> label_to_index;
+
+  for (const EquationSpec& equation : equation_specs) {
+    for (const OffsetTerm& offset_term : equation.offset_terms) {
+      if (label_to_index.find(offset_term.label) == label_to_index.end()) {
+        label_to_index[offset_term.label] = static_cast<int>(labels.size());
+        labels.push_back(offset_term.label);
+      }
+    }
+  }
+
+  return labels;
+}
+
 void BuildCoefficientMatrix(TMatrixD* matrix_a,
                             const std::vector<EquationSpec>& equation_specs,
-                            int delay_min,
-                            int delay_max) {
-  const int num_scanned_points = GetNumScannedPoints(delay_min, delay_max);
-  const int kNumOffsets = num_scanned_points * 2;
-  const int kNumParameters = kNumUnknowns + kNumOffsets;
+                            const std::vector<std::string>& offset_labels) {
+  const int kNumParameters = kNumUnknowns + static_cast<int>(offset_labels.size());
   const int num_rows = static_cast<int>(equation_specs.size());
+
+  std::map<std::string, int> label_to_index;
+  for (int i = 0; i < static_cast<int>(offset_labels.size()); ++i) {
+    label_to_index[offset_labels[i]] = i;
+  }
 
   matrix_a->ResizeTo(num_rows, kNumParameters);
   matrix_a->Zero();
@@ -281,17 +310,18 @@ void BuildCoefficientMatrix(TMatrixD* matrix_a,
     const EquationSpec& equation = equation_specs[row];
 
     for (int unknown_index : equation.unknown_indices) {
-      if (0 <= unknown_index && unknown_index < kNumUnknowns) {
-        (*matrix_a)(row, unknown_index) = 1.0;
-      } else {
-        std::cerr << "ERROR: Unknown index out of range in row " << row << std::endl;
-        exit(1);
-      }
+      (*matrix_a)(row, unknown_index) = 1.0;
     }
 
-    const int delay_offset_index = GetOffsetIndexFromDelay(equation.observation.delay, delay_min);
-    const int offset_col = kNumUnknowns + 2 * delay_offset_index + equation.offset_parity_index;
-    (*matrix_a)(row, offset_col) = 1.0;
+    for (const OffsetTerm& offset_term : equation.offset_terms) {
+      const auto it = label_to_index.find(offset_term.label);
+      if (it == label_to_index.end()) {
+        std::cerr << "ERROR: Unknown offset label in row " << row << std::endl;
+        exit(1);
+      }
+      const int offset_col = kNumUnknowns + it->second;
+      (*matrix_a)(row, offset_col) = offset_term.coefficient;
+    }
   }
 }
 
@@ -326,12 +356,11 @@ void SaveSolvedHistogram(const TVectorD& solved_n) {
 bool SolveShiftedSumWeighted(const TVectorD& measured_n,
                              const TVectorD& measured_sigma,
                              const std::vector<EquationSpec>& equation_specs,
+                             const std::vector<std::string>& offset_labels,
                              TVectorD* solved_n,
                              TMatrixD* covariance_matrix,
-                             TMatrixD* coefficient_matrix = nullptr) {
-  const int num_scanned_points = GetNumScannedPoints(kDelayMin, kDelayMax);
-  const int kNumOffsets = num_scanned_points * 2;
-  const int kNumParameters = kNumUnknowns + kNumOffsets;
+                             TMatrixD* coefficient_matrix) {
+  const int kNumParameters = kNumUnknowns + static_cast<int>(offset_labels.size());
   const int kNumObservations = static_cast<int>(equation_specs.size());
 
   if (measured_n.GetNrows() != kNumObservations ||
@@ -341,7 +370,7 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   }
 
   TMatrixD matrix_a;
-  BuildCoefficientMatrix(&matrix_a, equation_specs, kDelayMin, kDelayMax);
+  BuildCoefficientMatrix(&matrix_a, equation_specs, offset_labels);
   if (coefficient_matrix != nullptr) {
     coefficient_matrix->ResizeTo(matrix_a);
     *coefficient_matrix = matrix_a;
@@ -381,22 +410,20 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   Bool_t invert_ok = kFALSE;
 
   covariance_matrix->ResizeTo(kNumParameters, kNumParameters);
-  *covariance_matrix = normal_svd.Invert(invert_ok); /* (A^{T}*A)^{-1} */
+  *covariance_matrix = normal_svd.Invert(invert_ok);
 
   if (!invert_ok) {
     std::cerr << "Failed to invert normal matrix." << std::endl;
     return false;
   }
 
-  /* Solution of the linear equations, that is (A^{T}*A)^{-1} * A^{T} * measured_n, will be calculated in  */
   return true;
 }
 
 void PrintSolvedEquations(const TMatrixD& matrix_a,
                           const TVectorD& measured_n,
-                          const std::vector<EquationSpec>& equation_specs) {
-  const int num_scanned_points = GetNumScannedPoints(kDelayMin, kDelayMax);
-  const int kNumOffsets = num_scanned_points * 2;
+                          const std::vector<EquationSpec>& equation_specs,
+                          const std::vector<std::string>& offset_labels) {
   const int kNumObservations = static_cast<int>(equation_specs.size());
 
   for (int row = 0; row < kNumObservations; ++row) {
@@ -425,15 +452,8 @@ void PrintSolvedEquations(const TMatrixD& matrix_a,
 
       if (col < kNumUnknowns) {
         std::cout << "n_" << col + 1;
-      } else if (col < kNumUnknowns + kNumOffsets) {
-        const int local_offset_index = col - kNumUnknowns;
-        const int offset_delay = GetDelayFromOffsetIndex(local_offset_index / 2, kDelayMin);
-        const int parity_index = local_offset_index % 2;
-        const int run = GetRunFromDelayValue(offset_delay);
-        std::cout << "offset_delay" << offset_delay << "_run" << run
-                  << "_" << GetParityName(parity_index);
       } else {
-        std::cout << "parameter_" << col + 1;
+        std::cout << offset_labels[col - kNumUnknowns];
       }
       first_term = false;
     }
@@ -445,11 +465,9 @@ void PrintSolvedEquations(const TMatrixD& matrix_a,
   }
 }
 
-void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) {
-  const int num_scanned_points = GetNumScannedPoints(kDelayMin, kDelayMax);
-  const int kNumOffsets = num_scanned_points * 2;
-
-  /* Fine timing distribution part */
+void PrintSolution(const TVectorD& solved_n,
+                   const TMatrixD& covariance_matrix,
+                   const std::vector<std::string>& offset_labels) {
   for (int j = 1; j <= kNumUnknowns; ++j) {
     const double value = solved_n(j - 1);
     const double error = std::sqrt(covariance_matrix(j - 1, j - 1));
@@ -457,16 +475,11 @@ void PrintSolution(const TVectorD& solved_n, const TMatrixD& covariance_matrix) 
               << " +/- " << error << std::endl;
   }
 
-  /* Offset part */
-  for (int i = 0; i < kNumOffsets; ++i) {
-    const int delay = GetDelayFromOffsetIndex(i / 2, kDelayMin);
-    const int parity_index = i % 2;
-    const int run = GetRunFromDelayValue(delay);
-    const double offset = solved_n(kNumUnknowns + i);
-    const double offset_error = std::sqrt(covariance_matrix(kNumUnknowns + i, kNumUnknowns + i));
-    std::cout << "offset_delay" << delay << "_run" << run
-              << "_" << GetParityName(parity_index)
-              << " = " << offset
-              << " +/- " << offset_error << std::endl;
+  for (int i = 0; i < static_cast<int>(offset_labels.size()); ++i) {
+    const int parameter_index = kNumUnknowns + i;
+    const double value = solved_n(parameter_index);
+    const double error = std::sqrt(covariance_matrix(parameter_index, parameter_index));
+    std::cout << offset_labels[i] << " = " << value
+              << " +/- " << error << std::endl;
   }
 }
