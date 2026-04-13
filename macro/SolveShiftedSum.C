@@ -24,6 +24,11 @@ struct EquationSpec {
   int offset_parity_index;
   std::vector<int> unknown_indices;
 };
+//  Example: 
+//     For a line, N_{window_bin=1, hist_bin=2, delay=106} = n_1 + n_2 + n_3 + n_4 + n_5 + n_6 + offset_delay106_run43440_even = 1.20336,
+//     observation.window_bin=1, observation.hist_bin=2, observation.delay=106, 
+//     offset_parity_index=0,
+//     and unknown_indices={0,1,2,3,4,5} (index-1)
 
 namespace {
 constexpr int kDelayMin = 106;
@@ -194,8 +199,7 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
     exit(1);
   }
 
-  const std::regex prefix_regex(
-      R"(^N_\{window_bin=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
+  const std::regex prefix_regex(R"(^N_\{window_bin=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
   const std::regex unknown_regex(R"(n_(\d+))");
   const std::regex offset_regex(R"(offset_delay(\d+)_run(\d+)_(odd|even))");
 
@@ -217,13 +221,13 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
     spec.observation.hist_bin = std::stoi(prefix_match[2].str());
     spec.observation.delay = std::stoi(prefix_match[3].str());
 
-    const std::string rhs = prefix_match[4].str();
-    for (std::sregex_iterator it(rhs.begin(), rhs.end(), unknown_regex), end; it != end; ++it) {
+    const std::string right_hand_side = prefix_match[4].str();
+    for (std::sregex_iterator it(right_hand_side.begin(), right_hand_side.end(), unknown_regex), end; it != end; ++it) {
       spec.unknown_indices.push_back(std::stoi((*it)[1].str()) - 1);
     }
 
     std::smatch offset_match;
-    if (!std::regex_search(rhs, offset_match, offset_regex)) {
+    if (!std::regex_search(right_hand_side, offset_match, offset_regex)) {
       std::cerr << "ERROR: Missing offset term in equation line: " << line << std::endl;
       exit(1);
     }
