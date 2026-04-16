@@ -35,11 +35,11 @@ N_{window_bin=3, hist_bin=2, delay=119} = n_14 + n_15 + n_16 + n_17 + n_18 + n_1
 N_{window_bin=3, hist_bin=2, delay=120} = n_15 + n_16 + n_17 + n_18 + n_19 + n_20 = 47.1813
 N_{window_bin=3, hist_bin=2, delay=121} = n_16 + n_17 + n_18 + n_19 + n_20 + n_21 = 42.1042
 N_{window_bin=3, hist_bin=2, delay=122} = n_17 + n_18 + n_19 + n_20 + n_21 + n_22 = 22.7443
-N_{window_bin=4, hist_bin=2, delay=123} = n_18 + n_19 + n_20 + n_21 + n_22 + n_23 + 37*offset_delay123_run43282_even = 13.9877
-N_{window_bin=4, hist_bin=2, delay=124} = n_19 + n_20 + n_21 + n_22 + n_23 + n_24 + 37*offset_delay124_run43283_even = 4.23167
-N_{window_bin=4, hist_bin=2, delay=125} = n_20 + n_21 + n_22 + n_23 + n_24 + n_25 + 37*offset_delay125_run43285_even = 2.49992
-N_{window_bin=4, hist_bin=2, delay=126} = n_21 + n_22 + n_23 + n_24 + n_25 + n_26 + 37*offset_delay126_run43288_even = 1.37611
-N_{window_bin=4, hist_bin=2, delay=127} = n_22 + n_23 + n_24 + n_25 + n_26 + n_27 + 37*offset_delay127_run43291_even = 1.07361
+N_{window_bin=4, hist_bin=2, delay=123} = n_18 + n_19 + n_20 + n_21 + n_22 + n_23 + 37*offset_delay123_run43282 = 13.9877
+N_{window_bin=4, hist_bin=2, delay=124} = n_19 + n_20 + n_21 + n_22 + n_23 + n_24 + 37*offset_delay124_run43283 = 4.23167
+N_{window_bin=4, hist_bin=2, delay=125} = n_20 + n_21 + n_22 + n_23 + n_24 + n_25 + 37*offset_delay125_run43285 = 2.49992
+N_{window_bin=4, hist_bin=2, delay=126} = n_21 + n_22 + n_23 + n_24 + n_25 + n_26 + 37*offset_delay126_run43288 = 1.37611
+N_{window_bin=4, hist_bin=2, delay=127} = n_22 + n_23 + n_24 + n_25 + n_26 + n_27 + 37*offset_delay127_run43291 = 1.07361
 N_{window_bin=3, hist_bin=4, delay=106} = n_13 + n_14 + n_15 + n_16 + n_17 + n_18 = 47.7091
 N_{window_bin=3, hist_bin=4, delay=107} = n_14 + n_15 + n_16 + n_17 + n_18 + n_19 = 49.6616
 N_{window_bin=3, hist_bin=4, delay=108} = n_15 + n_16 + n_17 + n_18 + n_19 + n_20 = 51.8382
