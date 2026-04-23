@@ -35,37 +35,43 @@ struct EquationSpec {
 namespace {
 constexpr int kDelayMin = 106;
 constexpr int kDelayMax = 127;
-constexpr int kUnknownBlockSize = 6;
-constexpr int kNumUnknownBlocks = 4;
-constexpr int kNumUnknowns = kUnknownBlockSize * kNumUnknownBlocks;
-// const char* kEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
-const char* kEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_4BCO.c";
+const char* kEquationSpecPath =
+    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
 }
 
 int GetRunFromDelayValue(int delay);
+int GetNumUnknowns(const std::vector<EquationSpec>& equation_specs);
 std::vector<EquationSpec> LoadEquationSpecs(const std::string& path);
 std::vector<std::string> CollectOffsetLabels(const std::vector<EquationSpec>& equation_specs);
 void BuildCoefficientMatrix(TMatrixD* matrix_a,
+                            int num_unknowns,
                             const std::vector<EquationSpec>& equation_specs,
                             const std::vector<std::string>& offset_labels);
-void SaveSolvedHistogram(const TVectorD& solved_n);
+void SaveSolvedHistogram(int num_unknowns,
+                         const TVectorD& solved_n,
+                         const TMatrixD& covariance_matrix,
+                         const std::vector<std::string>& offset_labels);
 bool SolveShiftedSumWeighted(const TVectorD& measured_n,
                              const TVectorD& measured_sigma,
+                             int num_unknowns,
                              const std::vector<EquationSpec>& equation_specs,
                              const std::vector<std::string>& offset_labels,
                              TVectorD* solved_n,
                              TMatrixD* covariance_matrix,
                              TMatrixD* coefficient_matrix = nullptr);
-void PrintSolvedEquations(const TMatrixD& matrix_a,
+void PrintSolvedEquations(int num_unknowns,
+                          const TMatrixD& matrix_a,
                           const TVectorD& measured_n,
                           const std::vector<EquationSpec>& equation_specs,
                           const std::vector<std::string>& offset_labels);
-void PrintSolution(const TVectorD& solved_n,
+void PrintSolution(int num_unknowns,
+                   const TVectorD& solved_n,
                    const TMatrixD& covariance_matrix,
                    const std::vector<std::string>& offset_labels);
 
 void SolveShiftedSum() {
   const std::vector<EquationSpec> equation_specs = LoadEquationSpecs(kEquationSpecPath);
+  const int num_unknowns = GetNumUnknowns(equation_specs);
   const std::vector<std::string> offset_labels = CollectOffsetLabels(equation_specs);
   const int kNumObservations = static_cast<int>(equation_specs.size());
 
@@ -115,6 +121,7 @@ void SolveShiftedSum() {
   const bool success = SolveShiftedSumWeighted(
       measured_n,
       measured_sigma,
+      num_unknowns,
       equation_specs,
       offset_labels,
       &solved_n,
@@ -126,9 +133,9 @@ void SolveShiftedSum() {
     return;
   }
 
-  PrintSolvedEquations(coefficient_matrix, measured_n, equation_specs, offset_labels);
-  PrintSolution(solved_n, covariance_matrix, offset_labels);
-  SaveSolvedHistogram(solved_n);
+  PrintSolvedEquations(num_unknowns, coefficient_matrix, measured_n, equation_specs, offset_labels);
+  PrintSolution(num_unknowns, solved_n, covariance_matrix, offset_labels);
+  SaveSolvedHistogram(num_unknowns, solved_n, covariance_matrix, offset_labels);
 }
 
 
@@ -211,6 +218,22 @@ int GetRunFromDelayValue(int delay) {
   return -1;
 }
 
+int GetNumUnknowns(const std::vector<EquationSpec>& equation_specs) {
+  int max_unknown_index = -1;
+  for (const EquationSpec& equation : equation_specs) {
+    for (int unknown_index : equation.unknown_indices) {
+      max_unknown_index = std::max(max_unknown_index, unknown_index);
+    }
+  }
+
+  if (max_unknown_index < 0) {
+    std::cerr << "ERROR: No unknown terms were found in equation specs." << std::endl;
+    exit(1);
+  }
+
+  return max_unknown_index + 1;
+}
+
 std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
   std::ifstream input(path);
   if (!input) {
@@ -287,7 +310,7 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
     }
 
     for (int unknown_index : spec.unknown_indices) {
-      if (unknown_index < 0 || unknown_index >= kNumUnknowns) {
+      if (unknown_index < 0) {
         std::cerr << "ERROR: Unknown index out of range in equation line: " << line << std::endl;
         exit(1);
       }
@@ -330,9 +353,10 @@ std::vector<std::string> CollectOffsetLabels(const std::vector<EquationSpec>& eq
 }
 
 void BuildCoefficientMatrix(TMatrixD* matrix_a,
+                            int num_unknowns,
                             const std::vector<EquationSpec>& equation_specs,
                             const std::vector<std::string>& offset_labels) {
-  const int kNumParameters = kNumUnknowns + static_cast<int>(offset_labels.size());
+  const int kNumParameters = num_unknowns + static_cast<int>(offset_labels.size());
   const int num_rows = static_cast<int>(equation_specs.size());
 
   std::map<std::string, int> label_to_index;
@@ -356,13 +380,16 @@ void BuildCoefficientMatrix(TMatrixD* matrix_a,
         std::cerr << "ERROR: Unknown offset label in row " << row << std::endl;
         exit(1);
       }
-      const int offset_col = kNumUnknowns + it->second;
+      const int offset_col = num_unknowns + it->second;
       (*matrix_a)(row, offset_col) = offset_term.coefficient;
     }
   }
 }
 
-void SaveSolvedHistogram(const TVectorD& solved_n) {
+void SaveSolvedHistogram(int num_unknowns,
+                         const TVectorD& solved_n,
+                         const TMatrixD& covariance_matrix,
+                         const std::vector<std::string>& offset_labels) {
   const char* output_dir =
       "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/output";
   const char* root_filename =
@@ -373,13 +400,36 @@ void SaveSolvedHistogram(const TVectorD& solved_n) {
   gSystem->mkdir(output_dir, true);
 
   TH1D* h_solved_n = new TH1D("h_solved_n", "Solved n;bin index i;solved_n[i]",
-                              kNumUnknowns, 0.5, kNumUnknowns + 0.5);
-  for (int i = 0; i < kNumUnknowns; ++i) {
+                              num_unknowns, 0.5, num_unknowns + 0.5);
+  for (int i = 0; i < num_unknowns; ++i) {
     h_solved_n->SetBinContent(i + 1, solved_n(i));
+    if (covariance_matrix.GetNrows() > i && covariance_matrix.GetNcols() > i) {
+      h_solved_n->SetBinError(i + 1, std::sqrt(covariance_matrix(i, i)));
+    }
+  }
+
+  TH1D* h_solved_offsets = nullptr;
+  if (!offset_labels.empty()) {
+    h_solved_offsets =
+        new TH1D("h_solved_offsets", "Solved offsets;offset label;value",
+                 offset_labels.size(), 0.5, offset_labels.size() + 0.5);
+    for (int i = 0; i < static_cast<int>(offset_labels.size()); ++i) {
+      const int parameter_index = num_unknowns + i;
+      h_solved_offsets->SetBinContent(i + 1, solved_n(parameter_index));
+      if (covariance_matrix.GetNrows() > parameter_index &&
+          covariance_matrix.GetNcols() > parameter_index) {
+        h_solved_offsets->SetBinError(
+            i + 1, std::sqrt(covariance_matrix(parameter_index, parameter_index)));
+      }
+      h_solved_offsets->GetXaxis()->SetBinLabel(i + 1, offset_labels[i].c_str());
+    }
   }
 
   TFile output_file(root_filename, "RECREATE");
   h_solved_n->Write();
+  if (h_solved_offsets != nullptr) {
+    h_solved_offsets->Write();
+  }
   output_file.Close();
 
   TCanvas canvas("c_solved_n", "c_solved_n", 900, 600);
@@ -388,16 +438,18 @@ void SaveSolvedHistogram(const TVectorD& solved_n) {
   canvas.SaveAs(pdf_filename);
 
   delete h_solved_n;
+  delete h_solved_offsets;
 }
 
 bool SolveShiftedSumWeighted(const TVectorD& measured_n,
                              const TVectorD& measured_sigma,
+                             int num_unknowns,
                              const std::vector<EquationSpec>& equation_specs,
                              const std::vector<std::string>& offset_labels,
                              TVectorD* solved_n,
                              TMatrixD* covariance_matrix,
                              TMatrixD* coefficient_matrix) {
-  const int kNumParameters = kNumUnknowns + static_cast<int>(offset_labels.size());
+  const int kNumParameters = num_unknowns + static_cast<int>(offset_labels.size());
   const int kNumObservations = static_cast<int>(equation_specs.size());
 
   if (measured_n.GetNrows() != kNumObservations ||
@@ -407,7 +459,7 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   }
 
   TMatrixD matrix_a;
-  BuildCoefficientMatrix(&matrix_a, equation_specs, offset_labels);
+  BuildCoefficientMatrix(&matrix_a, num_unknowns, equation_specs, offset_labels);
   if (coefficient_matrix != nullptr) {
     coefficient_matrix->ResizeTo(matrix_a);
     *coefficient_matrix = matrix_a;
@@ -457,7 +509,8 @@ bool SolveShiftedSumWeighted(const TVectorD& measured_n,
   return true;
 }
 
-void PrintSolvedEquations(const TMatrixD& matrix_a,
+void PrintSolvedEquations(int num_unknowns,
+                          const TMatrixD& matrix_a,
                           const TVectorD& measured_n,
                           const std::vector<EquationSpec>& equation_specs,
                           const std::vector<std::string>& offset_labels) {
@@ -487,10 +540,10 @@ void PrintSolvedEquations(const TMatrixD& matrix_a,
         std::cout << abs_coefficient << " * ";
       }
 
-      if (col < kNumUnknowns) {
+      if (col < num_unknowns) {
         std::cout << "n_" << col + 1;
       } else {
-        std::cout << offset_labels[col - kNumUnknowns];
+        std::cout << offset_labels[col - num_unknowns];
       }
       first_term = false;
     }
@@ -502,10 +555,11 @@ void PrintSolvedEquations(const TMatrixD& matrix_a,
   }
 }
 
-void PrintSolution(const TVectorD& solved_n,
+void PrintSolution(int num_unknowns,
+                   const TVectorD& solved_n,
                    const TMatrixD& covariance_matrix,
                    const std::vector<std::string>& offset_labels) {
-  for (int j = 1; j <= kNumUnknowns; ++j) {
+  for (int j = 1; j <= num_unknowns; ++j) {
     const double value = solved_n(j - 1);
     const double error = std::sqrt(covariance_matrix(j - 1, j - 1));
     std::cout << "n_" << j << " = " << value
@@ -513,7 +567,7 @@ void PrintSolution(const TVectorD& solved_n,
   }
 
   for (int i = 0; i < static_cast<int>(offset_labels.size()); ++i) {
-    const int parameter_index = kNumUnknowns + i;
+    const int parameter_index = num_unknowns + i;
     const double value = solved_n(parameter_index);
     const double error = std::sqrt(covariance_matrix(parameter_index, parameter_index));
     std::cout << offset_labels[i] << " = " << value
