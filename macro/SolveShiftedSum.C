@@ -16,7 +16,7 @@
 #include "TVectorD.h"
 
 struct ObservationIndex {
-  int window_bin;
+  int relative_bin_position;
   int hist_bin;
   int delay;
 };
@@ -219,7 +219,7 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
   }
 
   const std::regex prefix_regex(
-      R"(^N_\{window_bin=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
+      R"(^N_\{relative_bin_position=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
   const std::regex unknown_regex(R"(n_(\d+))");
   const std::regex offset_term_regex(
       R"(((?:\d+(?:\.\d+)?)\s*\*\s*)?(offset_[A-Za-z0-9_]+))");
@@ -239,7 +239,7 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
     }
 
     EquationSpec spec;
-    spec.observation.window_bin = std::stoi(prefix_match[1].str());
+    spec.observation.relative_bin_position = std::stoi(prefix_match[1].str());
     spec.observation.hist_bin = std::stoi(prefix_match[2].str());
     spec.observation.delay = std::stoi(prefix_match[3].str());
 
@@ -293,8 +293,8 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
       }
     }
 
-    // if (spec.observation.window_bin < 1) {
-    //   std::cerr << "ERROR: Unexpected window_bin in equation line: " << line << std::endl;
+    // if (spec.observation.relative_bin_position < 1) {
+    //   std::cerr << "ERROR: Unexpected relative_bin_position in equation line: " << line << std::endl;
     //   exit(1);
     // }
     if (spec.observation.hist_bin < 1) {
@@ -465,7 +465,7 @@ void PrintSolvedEquations(const TMatrixD& matrix_a,
 
   for (int row = 0; row < kNumObservations; ++row) {
     const ObservationIndex& observation = equation_specs[row].observation;
-    std::cout << "N_{window_bin=" << observation.window_bin
+    std::cout << "N_{relative_bin_position=" << observation.relative_bin_position
               << ", hist_bin=" << observation.hist_bin
               << ", delay=" << observation.delay << "} = ";
 
