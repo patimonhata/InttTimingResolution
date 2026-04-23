@@ -36,10 +36,10 @@ namespace {
 constexpr int kDelayMin = 106;
 constexpr int kDelayMax = 127;
 constexpr int kUnknownBlockSize = 6;
-constexpr int kNumUnknownBlocks = 6;
+constexpr int kNumUnknownBlocks = 3;
 constexpr int kNumUnknowns = kUnknownBlockSize * kNumUnknownBlocks;
-const char* kEquationSpecPath =
-    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
+// const char* kEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
+const char* kEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_4BCO.c";
 }
 
 int GetRunFromDelayValue(int delay);
@@ -130,6 +130,43 @@ void SolveShiftedSum() {
   PrintSolution(solved_n, covariance_matrix, offset_labels);
   SaveSolvedHistogram(solved_n);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 int GetRunFromDelayValue(int delay) {
   std::vector< std::pair<int, int> > run_L1delay_list_scan6 = {
@@ -256,10 +293,10 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
       }
     }
 
-    if (spec.observation.window_bin < 1) {
-      std::cerr << "ERROR: Unexpected window_bin in equation line: " << line << std::endl;
-      exit(1);
-    }
+    // if (spec.observation.window_bin < 1) {
+    //   std::cerr << "ERROR: Unexpected window_bin in equation line: " << line << std::endl;
+    //   exit(1);
+    // }
     if (spec.observation.hist_bin < 1) {
       std::cerr << "ERROR: Unexpected hist_bin in equation line: " << line << std::endl;
       exit(1);
