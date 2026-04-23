@@ -36,7 +36,7 @@ namespace {
 constexpr int kDelayMin = 106;
 constexpr int kDelayMax = 127;
 constexpr int kUnknownBlockSize = 6;
-constexpr int kNumUnknownBlocks = 3;
+constexpr int kNumUnknownBlocks = 4;
 constexpr int kNumUnknowns = kUnknownBlockSize * kNumUnknownBlocks;
 // const char* kEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
 const char* kEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_4BCO.c";
@@ -219,7 +219,7 @@ std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
   }
 
   const std::regex prefix_regex(
-      R"(^N_\{relative_bin_position=(\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
+      R"(^N_\{relative_bin_position=(-?\d+), hist_bin=(\d+), delay=(\d+)\} = (.*)$)");
   const std::regex unknown_regex(R"(n_(\d+))");
   const std::regex offset_term_regex(
       R"(((?:\d+(?:\.\d+)?)\s*\*\s*)?(offset_[A-Za-z0-9_]+))");
