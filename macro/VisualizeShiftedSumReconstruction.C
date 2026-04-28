@@ -2,6 +2,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <regex>
 #include <set>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "TBox.h"
+#include "TArrow.h"
 #include "TCanvas.h"
 #include "TFile.h"
 #include "TH1D.h"
@@ -290,33 +292,83 @@ double ComputeMaximumMagnitude(const TH1D* hist) {
   return max_magnitude;
 }
 
-void DrawContributionBox(double x_low,
-                         double x_high,
-                         double value,
-                         int color,
-                         double* positive_cursor,
-                         double* negative_cursor) {
-  if (std::abs(value) < 1e-12) {
+double ComputeMinimumPositive(const TH1D* hist) {
+  double min_positive = -1.0;
+  for (int bin = 1; bin <= hist->GetNbinsX(); ++bin) {
+    const double value = hist->GetBinContent(bin);
+    if (value <= 0.0) {
+      continue;
+    }
+    if (min_positive < 0.0 || value < min_positive) {
+      min_positive = value;
+    }
+  }
+  return min_positive;
+}
+
+void DrawContributionArrowSequence(double x_low,
+                                   double x_high,
+                                   const std::vector<Contribution>& contributions,
+                                   double min_draw_y) {
+  if (contributions.empty()) {
     return;
   }
 
-  double y_low = 0.0;
-  double y_high = 0.0;
-  if (value >= 0.0) {
-    y_low = *positive_cursor;
-    y_high = *positive_cursor + value;
-    *positive_cursor = y_high;
-  } else {
-    y_high = *negative_cursor;
-    y_low = *negative_cursor + value;
-    *negative_cursor = y_low;
+  const double width = x_high - x_low;
+  const double margin = 0.14 * width;
+  const double usable_x_low = x_low + margin;
+  const double usable_x_high = x_high - margin;
+  const int num_steps = static_cast<int>(contributions.size());
+  const double delta_x =
+      (num_steps > 1) ? (usable_x_high - usable_x_low) / (num_steps - 1) : 0.0;
+
+  double cumulative = 0.0;
+  double previous_x = usable_x_low;
+
+  for (int i = 0; i < num_steps; ++i) {
+    const Contribution& contribution = contributions[i];
+    const double current_x = usable_x_low + delta_x * i;
+    const double next_cumulative = cumulative + contribution.value;
+    const double draw_start = std::max(cumulative, min_draw_y);
+    const double draw_end = std::max(next_cumulative, min_draw_y);
+
+    if (i > 0) {
+      TLine* connector = new TLine(previous_x, draw_start, current_x, draw_start);
+      connector->SetLineColor(kGray + 1);
+      connector->SetLineStyle(1);
+      connector->SetLineWidth(1);
+      connector->Draw();
+    }
+
+    if (draw_end > draw_start) {
+      TArrow* arrow = new TArrow(current_x, draw_start, current_x, draw_end, 0.015, "|>");
+      arrow->SetLineColor(contribution.color);
+      arrow->SetFillColor(contribution.color);
+      arrow->SetLineWidth(2);
+      arrow->Draw();
+    } else if (draw_end < draw_start) {
+      TArrow* arrow = new TArrow(current_x, draw_start, current_x, draw_end, 0.015, "|>");
+      arrow->SetLineColor(contribution.color);
+      arrow->SetFillColor(contribution.color);
+      arrow->SetLineWidth(2);
+      arrow->Draw();
+    } else {
+      TLine* clipped = new TLine(current_x - 0.015 * width, draw_start,
+                                 current_x + 0.015 * width, draw_start);
+      clipped->SetLineColor(contribution.color);
+      clipped->SetLineWidth(2);
+      clipped->Draw();
+    }
+
+    cumulative = next_cumulative;
+    previous_x = current_x;
   }
 
-  TBox* box = new TBox(x_low, y_low, x_high, y_high);
-  box->SetFillColorAlpha(color, 0.55);
-  box->SetLineColor(color);
-  box->SetLineWidth(1);
-  box->Draw();
+  const double draw_final = std::max(cumulative, min_draw_y);
+  TLine* final_level = new TLine(usable_x_high, draw_final, x_high - 0.04 * width, draw_final);
+  final_level->SetLineColor(kGray + 1);
+  final_level->SetLineWidth(1);
+  final_level->Draw();
 }
 
 void DrawLegend(std::vector<TH1D*>* dummies,
@@ -332,34 +384,34 @@ void DrawLegend(std::vector<TH1D*>* dummies,
 
   if (has_before_peak_even) {
     TH1D* dummy = new TH1D(Form("dummy_before_even_%zu", dummies->size()), "", 1, 0.0, 1.0);
-    dummy->SetFillColor(kBeforePeakEvenColor);
+    dummy->SetLineWidth(3);
     dummy->SetLineColor(kBeforePeakEvenColor);
     dummies->push_back(dummy);
-    legend->AddEntry(dummy, "before_peak_even", "f");
+    legend->AddEntry(dummy, "before_peak_even", "l");
   }
 
   if (has_before_peak_odd) {
     TH1D* dummy = new TH1D(Form("dummy_before_odd_%zu", dummies->size()), "", 1, 0.0, 1.0);
-    dummy->SetFillColor(kBeforePeakOddColor);
+    dummy->SetLineWidth(3);
     dummy->SetLineColor(kBeforePeakOddColor);
     dummies->push_back(dummy);
-    legend->AddEntry(dummy, "before_peak_odd", "f");
+    legend->AddEntry(dummy, "before_peak_odd", "l");
   }
 
   if (has_regular_offset) {
     TH1D* dummy = new TH1D(Form("dummy_offset_%zu", dummies->size()), "", 1, 0.0, 1.0);
-    dummy->SetFillColor(kRegularOffsetColor);
+    dummy->SetLineWidth(3);
     dummy->SetLineColor(kRegularOffsetColor);
     dummies->push_back(dummy);
-    legend->AddEntry(dummy, "offset", "f");
+    legend->AddEntry(dummy, "offset", "l");
   }
 
   for (int rank = 0; rank <= max_rank_used; ++rank) {
     TH1D* dummy = new TH1D(Form("dummy_rank_%d_%zu", rank, dummies->size()), "", 1, 0.0, 1.0);
-    dummy->SetFillColor(GetFineRankColor(rank));
+    dummy->SetLineWidth(3);
     dummy->SetLineColor(GetFineRankColor(rank));
     dummies->push_back(dummy);
-    legend->AddEntry(dummy, GetFineRankLabel(rank).c_str(), "f");
+    legend->AddEntry(dummy, GetFineRankLabel(rank).c_str(), "l");
   }
 
   if (include_boundary_entry) {
@@ -461,13 +513,16 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
                  const std::vector<EquationSpec>& run_equations,
                  const SolvedParameters& solved_parameters,
                  int run,
-                 const std::string& output_dir) {
+                 const std::string& output_dir,
+                 bool use_log_y) {
   std::map<int, std::vector<Contribution> > contributions_by_hist_bin;
   bool has_before_peak_even = false;
   bool has_before_peak_odd = false;
   bool has_regular_offset = false;
   int max_rank_used = -1;
   double reconstructed_max_magnitude = 0.0;
+  double reconstructed_max_positive = 0.0;
+  double reconstructed_min_positive = -1.0;
 
   for (int i = 0; i < static_cast<int>(run_equations.size()); ++i) {
     const EquationSpec& equation = run_equations[i];
@@ -518,19 +573,46 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
     }
 
     double reconstructed_sum = 0.0;
+    double cumulative = 0.0;
     for (int j = 0; j < static_cast<int>(contributions.size()); ++j) {
       reconstructed_sum += contributions[j].value;
+      cumulative += contributions[j].value;
+      if (cumulative > 0.0) {
+        reconstructed_max_positive = std::max(reconstructed_max_positive, cumulative);
+        if (reconstructed_min_positive < 0.0 || cumulative < reconstructed_min_positive) {
+          reconstructed_min_positive = cumulative;
+        }
+      }
     }
     reconstructed_max_magnitude =
         std::max(reconstructed_max_magnitude, std::abs(reconstructed_sum));
   }
 
   TCanvas canvas(Form("c_h_bco_diff_shifted_run%d", run), "", 1400, 700);
+  canvas.SetLogy(use_log_y);
 
   const double measured_max = std::max(1.0, ComputeMaximumMagnitude(h_bco_diff_shifted));
-  const double full_scale = std::max(measured_max, reconstructed_max_magnitude);
-  const double y_min = -0.15 * full_scale;
-  const double y_max = 1.25 * full_scale;
+  const double measured_min_positive = ComputeMinimumPositive(h_bco_diff_shifted);
+  const double full_scale =
+      std::max(measured_max, std::max(reconstructed_max_magnitude, reconstructed_max_positive));
+
+  double y_min = 0.0;
+  double y_max = 0.0;
+  if (use_log_y) {
+    y_min = measured_min_positive;
+    if (reconstructed_min_positive > 0.0 &&
+        (y_min <= 0.0 || reconstructed_min_positive < y_min)) {
+      y_min = reconstructed_min_positive;
+    }
+    if (y_min <= 0.0) {
+      y_min = std::max(1e-3, full_scale * 1e-4);
+    }
+    y_min *= 0.5;
+    y_max = std::max(1.0, full_scale) * 2.0;
+  } else {
+    y_min = -0.15 * std::max(1.0, full_scale);
+    y_max = 1.25 * std::max(1.0, full_scale);
+  }
 
   TH1D* frame =
       dynamic_cast<TH1D*>(h_bco_diff_shifted->Clone(Form("h_bco_diff_shifted_frame_run%d", run)));
@@ -552,20 +634,8 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
 
     const double x_low = h_bco_diff_shifted->GetXaxis()->GetBinLowEdge(hist_bin);
     const double x_high = h_bco_diff_shifted->GetXaxis()->GetBinUpEdge(hist_bin);
-    double positive_cursor = 0.0;
-    double negative_cursor = 0.0;
-
-    for (int i = 0; i < static_cast<int>(it->second.size()); ++i) {
-      DrawContributionBox(x_low, x_high, it->second[i].value, it->second[i].color,
-                          &positive_cursor, &negative_cursor);
-    }
-
-    TBox* outline =
-        new TBox(x_low, std::min(negative_cursor, 0.0), x_high, std::max(positive_cursor, 0.0));
-    outline->SetFillStyle(0);
-    outline->SetLineColor(kBlack);
-    outline->SetLineWidth(1);
-    outline->Draw();
+    DrawContributionArrowSequence(x_low, x_high, it->second,
+                                  use_log_y ? y_min : std::numeric_limits<double>::lowest());
   }
 
   TH1D* overlay = dynamic_cast<TH1D*>(
@@ -582,7 +652,11 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
   std::vector<TH1D*> dummies;
   DrawLegend(&dummies, std::max(0, max_rank_used), has_before_peak_even,
              has_before_peak_odd, has_regular_offset, false);
-  canvas.SaveAs((output_dir + Form("/run%d_h_bco_diff_shifted_reconstruction.pdf", run)).c_str());
+  canvas.SaveAs(
+      (output_dir +
+       Form("/run%d_h_bco_diff_shifted_reconstruction_%s.pdf", run,
+            use_log_y ? "log" : "linear"))
+          .c_str());
 
   delete frame;
   delete overlay;
@@ -637,7 +711,8 @@ void VisualizeShiftedSumReconstruction(
     }
 
     SaveFigure1(h_solved_n, it->second, run, output_dir);
-    SaveFigure2(h_bco_diff_shifted, it->second, solved_parameters, run, output_dir);
+    SaveFigure2(h_bco_diff_shifted, it->second, solved_parameters, run, output_dir, false);
+    SaveFigure2(h_bco_diff_shifted, it->second, solved_parameters, run, output_dir, true);
     std::cout << "Created visualization for run " << run << std::endl;
 
     delete h_bco_diff_shifted;
