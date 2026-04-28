@@ -33,10 +33,10 @@ struct EquationSpec {
 };
 
 namespace {
-constexpr int kDelayMin = 106;
+constexpr int kDelayMin = 119;
 constexpr int kDelayMax = 127;
 const char* kEquationSpecPath =
-    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
+    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_5BCO_18FineBins_scan1.c";
 }
 
 int GetRunFromDelayValue(int delay);
