@@ -90,6 +90,29 @@ int GetRunFromDelayValue(int delay) {
   return -1;
 }
 
+int GetDelayFromRunValue(int run) {
+  std::vector<std::pair<int, int> > run_L1delay_list_scan6 = {
+      {43291, 127}, {43288, 126}, {43285, 125}, {43283, 124}, {43282, 123},
+      {43280, 122}, {43278, 121}, {43276, 120}, {43313, 119}};
+  std::vector<std::pair<int, int> > run_L1delay_list_scan7 = {
+      {43408, 120}, {43410, 119}, {43412, 118}, {43413, 117}, {43414, 116},
+      {43415, 115}, {43417, 114}, {43421, 113}, {43426, 112}, {43441, 110},
+      {43434, 109}, {43436, 108}, {43438, 107}, {43440, 106}};
+
+  for (int i = 0; i < static_cast<int>(run_L1delay_list_scan6.size()); ++i) {
+    if (run == run_L1delay_list_scan6[i].first) {
+      return run_L1delay_list_scan6[i].second;
+    }
+  }
+
+  for (int i = 0; i < static_cast<int>(run_L1delay_list_scan7.size()); ++i) {
+    if (run == run_L1delay_list_scan7[i].first) {
+      return run_L1delay_list_scan7[i].second;
+    }
+  }
+  return -1;
+}
+
 std::vector<EquationSpec> LoadEquationSpecs(const std::string& path) {
   std::ifstream input(path.c_str());
   if (!input) {
@@ -219,25 +242,15 @@ std::map<int, std::vector<EquationSpec> > GroupEquationsByRun(
   return grouped;
 }
 
-int GetFineRankColor(int rank) {
+int GetFineBinColor(int fine_bin_index) {
   static const int colors[] = {
       kRed + 1,    kMagenta + 1, kViolet - 1, kBlue + 1,
       kCyan + 1,   kTeal + 1,    kSpring + 5, kPink + 9};
-  return colors[rank % (sizeof(colors) / sizeof(colors[0]))];
+  return colors[fine_bin_index % (sizeof(colors) / sizeof(colors[0]))];
 }
 
-std::string GetFineRankLabel(int rank) {
-  const int position = rank + 1;
-  if (position == 1) {
-    return "youngest fine bin";
-  }
-  if (position == 2) {
-    return "2nd fine bin";
-  }
-  if (position == 3) {
-    return "3rd fine bin";
-  }
-  return Form("%dth fine bin", position);
+std::string GetFineBinLabel(int fine_bin_index) {
+  return Form("h_solved_n bin %d", fine_bin_index + 1);
 }
 
 int GetOffsetColor(const std::string& label) {
@@ -306,6 +319,19 @@ double ComputeMinimumPositive(const TH1D* hist) {
   return min_positive;
 }
 
+void DrawRunDelayLabel(int run) {
+  const int delay = GetDelayFromRunValue(run);
+  TLatex latex;
+  latex.SetNDC();
+  latex.SetTextAlign(13);
+  latex.SetTextSize(0.032);
+  if (delay >= 0) {
+    latex.DrawLatex(0.11, 0.965, Form("run %d, L1delay %d", run, delay));
+  } else {
+    latex.DrawLatex(0.11, 0.965, Form("run %d, L1delay unknown", run));
+  }
+}
+
 void DrawContributionArrowSequence(double x_low,
                                    double x_high,
                                    const std::vector<Contribution>& contributions,
@@ -372,7 +398,7 @@ void DrawContributionArrowSequence(double x_low,
 }
 
 void DrawLegend(std::vector<TH1D*>* dummies,
-                int max_rank_used,
+                const std::set<int>& used_fine_bins,
                 bool has_before_peak_even,
                 bool has_before_peak_odd,
                 bool has_regular_offset,
@@ -406,12 +432,15 @@ void DrawLegend(std::vector<TH1D*>* dummies,
     legend->AddEntry(dummy, "offset", "l");
   }
 
-  for (int rank = 0; rank <= max_rank_used; ++rank) {
-    TH1D* dummy = new TH1D(Form("dummy_rank_%d_%zu", rank, dummies->size()), "", 1, 0.0, 1.0);
+  for (std::set<int>::const_iterator it = used_fine_bins.begin(); it != used_fine_bins.end();
+       ++it) {
+    const int fine_bin_index = *it;
+    TH1D* dummy = new TH1D(Form("dummy_fine_bin_%d_%zu", fine_bin_index, dummies->size()), "",
+                           1, 0.0, 1.0);
     dummy->SetLineWidth(3);
-    dummy->SetLineColor(GetFineRankColor(rank));
+    dummy->SetLineColor(GetFineBinColor(fine_bin_index));
     dummies->push_back(dummy);
-    legend->AddEntry(dummy, GetFineRankLabel(rank).c_str(), "l");
+    legend->AddEntry(dummy, GetFineBinLabel(fine_bin_index).c_str(), "l");
   }
 
   if (include_boundary_entry) {
@@ -445,7 +474,7 @@ void SaveFigure1(const TH1D* h_solved_n,
   frame->Draw("AXIS");
 
   std::set<double> boundaries;
-  int max_rank_used = -1;
+  std::set<int> used_fine_bins;
   for (int i = 0; i < static_cast<int>(run_equations.size()); ++i) {
     const EquationSpec& equation = run_equations[i];
     if (equation.unknown_indices.empty()) {
@@ -458,15 +487,16 @@ void SaveFigure1(const TH1D* h_solved_n,
     boundaries.insert(h_solved_n->GetXaxis()->GetBinUpEdge(last_hist_bin));
 
     for (int rank = 0; rank < static_cast<int>(equation.unknown_indices.size()); ++rank) {
-      const int fine_hist_bin = equation.unknown_indices[rank] + 1;
+      const int fine_bin_index = equation.unknown_indices[rank];
+      const int fine_hist_bin = fine_bin_index + 1;
       const double value = h_solved_n->GetBinContent(fine_hist_bin);
       const double x_low = h_solved_n->GetXaxis()->GetBinLowEdge(fine_hist_bin);
       const double x_high = h_solved_n->GetXaxis()->GetBinUpEdge(fine_hist_bin);
       TBox* box = new TBox(x_low, std::min(0.0, value), x_high, std::max(0.0, value));
-      box->SetFillColorAlpha(GetFineRankColor(rank), 0.55);
-      box->SetLineColor(GetFineRankColor(rank));
+      box->SetFillColorAlpha(GetFineBinColor(fine_bin_index), 0.55);
+      box->SetLineColor(GetFineBinColor(fine_bin_index));
       box->Draw();
-      max_rank_used = std::max(max_rank_used, rank);
+      used_fine_bins.insert(fine_bin_index);
     }
   }
 
@@ -498,15 +528,12 @@ void SaveFigure1(const TH1D* h_solved_n,
     latex.DrawLatex(x_center, y_max * 0.96, Form("hist bin %d", equation.observation.hist_bin));
   }
 
-  std::vector<TH1D*> dummies;
-  DrawLegend(&dummies, std::max(0, max_rank_used), false, false, false, true);
+  DrawRunDelayLabel(run);
+
   canvas.SaveAs((output_dir + Form("/run%d_solved_n_partition.pdf", run)).c_str());
 
   delete frame;
   delete overlay;
-  for (int i = 0; i < static_cast<int>(dummies.size()); ++i) {
-    delete dummies[i];
-  }
 }
 
 void SaveFigure2(const TH1D* h_bco_diff_shifted,
@@ -519,7 +546,7 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
   bool has_before_peak_even = false;
   bool has_before_peak_odd = false;
   bool has_regular_offset = false;
-  int max_rank_used = -1;
+  std::set<int> used_fine_bins;
   double reconstructed_max_magnitude = 0.0;
   double reconstructed_max_positive = 0.0;
   double reconstructed_min_positive = -1.0;
@@ -565,11 +592,11 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
       }
 
       Contribution contribution;
-      contribution.label = GetFineRankLabel(rank);
+      contribution.label = GetFineBinLabel(unknown_index);
       contribution.value = solved_parameters.fine_values[unknown_index];
-      contribution.color = GetFineRankColor(rank);
+      contribution.color = GetFineBinColor(unknown_index);
       contributions.push_back(contribution);
-      max_rank_used = std::max(max_rank_used, rank);
+      used_fine_bins.insert(unknown_index);
     }
 
     double reconstructed_sum = 0.0;
@@ -591,27 +618,14 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
   TCanvas canvas(Form("c_h_bco_diff_shifted_run%d", run), "", 1400, 700);
   canvas.SetLogy(use_log_y);
 
-  const double measured_max = std::max(1.0, ComputeMaximumMagnitude(h_bco_diff_shifted));
-  const double measured_min_positive = ComputeMinimumPositive(h_bco_diff_shifted);
-  const double full_scale =
-      std::max(measured_max, std::max(reconstructed_max_magnitude, reconstructed_max_positive));
-
   double y_min = 0.0;
   double y_max = 0.0;
   if (use_log_y) {
-    y_min = measured_min_positive;
-    if (reconstructed_min_positive > 0.0 &&
-        (y_min <= 0.0 || reconstructed_min_positive < y_min)) {
-      y_min = reconstructed_min_positive;
-    }
-    if (y_min <= 0.0) {
-      y_min = std::max(1e-3, full_scale * 1e-4);
-    }
-    y_min *= 0.5;
-    y_max = std::max(1.0, full_scale) * 2.0;
+    y_min = 0.01;
+    y_max = 2.0 * 100.0;
   } else {
-    y_min = -0.15 * std::max(1.0, full_scale);
-    y_max = 1.25 * std::max(1.0, full_scale);
+    y_min = -7.5;
+    y_max = 90.0;
   }
 
   TH1D* frame =
@@ -649,9 +663,8 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
   overlay->Draw("HIST SAME");
   overlay->Draw("E1 SAME");
 
-  std::vector<TH1D*> dummies;
-  DrawLegend(&dummies, std::max(0, max_rank_used), has_before_peak_even,
-             has_before_peak_odd, has_regular_offset, false);
+  DrawRunDelayLabel(run);
+
   canvas.SaveAs(
       (output_dir +
        Form("/run%d_h_bco_diff_shifted_reconstruction_%s.pdf", run,
@@ -660,9 +673,6 @@ void SaveFigure2(const TH1D* h_bco_diff_shifted,
 
   delete frame;
   delete overlay;
-  for (int i = 0; i < static_cast<int>(dummies.size()); ++i) {
-    delete dummies[i];
-  }
 }
 
 }  // namespace
