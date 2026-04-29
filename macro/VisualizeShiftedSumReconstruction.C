@@ -53,8 +53,8 @@ struct Contribution {
 
 namespace {
 
-const char* kDefaultEquationSpecPath =
-    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
+// const char* kDefaultEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
+const char* kDefaultEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_5BCO_18FineBins_scan1.c";
 const char* kDefaultSolvedRootPath =
     "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/output/solved_n.root";
 const char* kDefaultInputDir =
@@ -70,7 +70,9 @@ const int kBoundaryLineColor = kGray + 2;
 int GetRunFromDelayValue(int delay) {
   std::vector<std::pair<int, int> > run_L1delay_list_scan6 = {
       {43291, 127}, {43288, 126}, {43285, 125}, {43283, 124}, {43282, 123},
-      {43280, 122}, {43278, 121}, {43276, 120}, {43313, 119}};
+      {43280, 122}, {43278, 121}, 
+      {43276, 120}, {43313, 119}
+    };
   std::vector<std::pair<int, int> > run_L1delay_list_scan7 = {
       {43408, 120}, {43410, 119}, {43412, 118}, {43413, 117}, {43414, 116},
       {43415, 115}, {43417, 114}, {43421, 113}, {43426, 112}, {43441, 110},
