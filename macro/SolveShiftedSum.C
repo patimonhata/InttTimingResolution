@@ -36,7 +36,7 @@ namespace {
 constexpr int kDelayMin = 119;
 constexpr int kDelayMax = 127;
 const char* kEquationSpecPath =
-    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_5BCO_18FineBins_scan1.c";
+    "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_5BCO_18FineBins_Group2_wo43421.c";
     // "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
 }
 
@@ -185,8 +185,8 @@ int GetRunFromDelayValue(int delay) {
     {43282, 123},
     {43280, 122},
     {43278, 121},
-    {43276, 120},
-    {43313, 119}
+    // {43276, 120},
+    // {43313, 119}
   };
   std::vector< std::pair<int, int> > run_L1delay_list_scan7 = {
     {43408, 120},

@@ -54,7 +54,7 @@ struct Contribution {
 namespace {
 
 // const char* kDefaultEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
-const char* kDefaultEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_5BCO_18FineBins_scan1.c";
+const char* kDefaultEquationSpecPath = "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_5BCO_18FineBins_Group1_wo43280.c";
 const char* kDefaultSolvedRootPath =
     "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/output/solved_n.root";
 const char* kDefaultInputDir =
