@@ -37,6 +37,7 @@ constexpr int kDelayMin = 119;
 constexpr int kDelayMax = 127;
 const char* kEquationSpecPath =
     "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved_5BCO_18FineBins_scan1.c";
+    // "/sphenix/tg/tg01/commissioning/INTT/work/ryotaro/TimingResolution/macro/LinearEquationsToBeSolved.c";
 }
 
 int GetRunFromDelayValue(int delay);
