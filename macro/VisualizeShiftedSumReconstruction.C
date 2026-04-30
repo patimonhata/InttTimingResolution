@@ -463,9 +463,8 @@ void SaveFigure1(const TH1D* h_solved_n,
                  const std::string& output_dir) {
   TCanvas canvas(Form("c_solved_n_partition_run%d", run), "", 1400, 700);
 
-  const double max_magnitude = std::max(1.0, ComputeMaximumMagnitude(h_solved_n));
-  const double y_min = -0.15 * max_magnitude;
-  const double y_max = 1.25 * max_magnitude;
+  const double y_min = -10.0;
+  const double y_max = 50.0;
 
   TH1D* frame = dynamic_cast<TH1D*>(h_solved_n->Clone(Form("h_solved_n_frame_run%d", run)));
   frame->Reset("ICES");
