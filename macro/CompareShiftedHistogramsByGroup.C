@@ -55,6 +55,7 @@ TH1D* LoadShiftedHistogram(const std::string& input_dir, int run) {
   }
 
   TH1D* input_hist = dynamic_cast<TH1D*>(input_file->Get("h_bco_diff_shifted"));
+  // TH1D* input_hist = dynamic_cast<TH1D*>(input_file->Get("h_bco_diff_felix_server_0"));
   if (input_hist == nullptr) {
     std::cerr << "ERROR: h_bco_diff_shifted is missing in " << filepath << std::endl;
     input_file->Close();
